@@ -41,6 +41,7 @@ Centralizar, enriquecer e gerenciar a operação de delivery recebida via Cardap
 
 ## 📁 Estrutura do Projeto
 
+```bash
 .
 ├── docker/                          # Infraestrutura Docker
 │   ├── docker-compose.yml          # Orquestração completa
@@ -79,7 +80,7 @@ Centralizar, enriquecer e gerenciar a operação de delivery recebida via Cardap
 ├── architecture.md             # ADRs (Architecture Decision Records)
 ├── deployment.md               # Guia de deploy
 └── runbooks/                   # Playbooks de incidentes
-
+```
 
 ## 🚀 Quick Start
 
