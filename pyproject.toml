@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cardapioweb-integrator"
+version = "0.1.0"
+description = "Integração de webhooks Cardapioweb para analytics operacional"
+requires-python = ">=3.11"
+authors = [
+    {name = "Caramelo Team"}
+]
+
+[tool.setuptools]
+# Pacote não-tradicional (src-layout)
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -43,43 +43,55 @@ Centralizar, enriquecer e gerenciar a operação de delivery recebida via Cardap
 
 ```bash
 .
-├── docker/                          # Infraestrutura Docker
-│   ├── docker-compose.yml          # Orquestração completa
-│   ├── Dockerfile                  # Multi-stage Python
+cardapioweb-integrator/
+├── docker/
+│   ├── docker-compose.yml
+│   ├── Dockerfile
+│   ├── .env.example
+│   ├── .dockerignore
 │   └── postgres/
-│       └── initdb/                 # Scripts SQL (00-08)
-│
-├── src/                             # Código-fonte principal
-│   ├── config.py                   # Configurações Pydantic
-│   ├── main.py                     # Entry point FastAPI
-│   ├── api/                        # Camada HTTP
-│   │   ├── routes/                 # Endpoints (webhooks, health, admin)
-│   │   ├── dependencies.py         # Injeção de dependências
-│   │   └── middleware.py           # Logging, correlation ID
-│   ├── core/                       # Regras de negócio
-│   │   ├── models/                 # Pydantic models
-│   │   └── services/               # Inbox, enriquecimento, geo, operation day
-│   ├── infrastructure/             # Adaptadores externos
-│   │   ├── db/                     # SQLAlchemy, conexões
-│   │   ├── cache/                  # Redis client
-│   │   └── external/               # Clients Cardapioweb (pública + dashboard)
-│   └── tasks/                      # Background processing
-│       ├── worker.py               # Loop de processamento
-│       └── snapshot_generator.py   # Cron de métricas
-│
-├── tests/                           # Testes
-│   ├── integration/                # Testes de integração
-│   └── unit/                       # Testes unitários
-│
-├── scripts/                         # Utilitários
-│   ├── init-db.sh                  # Setup inicial
-│   ├── backup.sh                   # Backup para S3
-│   └── load_test.py                # Teste de carga
-│
-└── docs/                            # Documentação
-├── architecture.md             # ADRs (Architecture Decision Records)
-├── deployment.md               # Guia de deploy
-└── runbooks/                   # Playbooks de incidentes
+│       ├── Dockerfile
+│       ├── postgresql.conf
+│       └── initdb/
+│           ├── 00_extensions.sql
+│           ├── 01_merchants.sql
+│           ├── 02_operation_days.sql
+│           ├── 03_webhook_inbox.sql
+│           ├── 04_orders.sql
+│           ├── 05_order_events.sql
+│           ├── 06_operation_snapshots.sql
+│           ├── 07_views.sql
+│           └── 08_indexes.sql
+├── src/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── main.py
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── routes/
+│   │   │   └── __init__.py
+│   │   ├── dependencies.py
+│   │   └── middleware.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── models/
+│   │   │   └── __init__.py
+│   │   └── services/
+│   │       └── __init__.py
+│   ├── infrastructure/
+│   │   ├── __init__.py
+│   │   ├── db/
+│   │   │   ├── __init__.py
+│   │   │   └── connection.py
+│   │   └── cache/
+│   │       ├── __init__.py
+│   │       └── redis_client.py
+│   └── tasks/
+│       └── __init__.py
+├── tests/
+├── docs/
+├── requirements.txt
+└── main.py
 ```
 
 ## 🚀 Quick Start
