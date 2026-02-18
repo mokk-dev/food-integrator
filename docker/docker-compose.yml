@@ -16,8 +16,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    expose:
+      - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-delivery}"]
       interval: 10s
@@ -31,9 +31,6 @@ services:
         limits:
           cpus: '2'
           memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
 
   redis:
     image: redis:7-alpine
@@ -42,8 +39,8 @@ services:
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    expose:
+      - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -51,11 +48,6 @@ services:
       retries: 5
     networks:
       - integrator-network
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
 
   app:
     build:
@@ -65,30 +57,25 @@ services:
     container_name: integrator-app
     restart: unless-stopped
     environment:
-      # Database
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme_in_production}@db:5432/${POSTGRES_DB:-delivery}
       DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-20}
       DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-10}
       
-      # Redis
       REDIS_URL: redis://redis:6379/0
       
-      # Security
       WEBHOOK_SECRET_TOKEN: ${WEBHOOK_SECRET_TOKEN}
       API_KEY_HEADER: ${API_KEY_HEADER:-X-API-Key}
       
-      # Application
       APP_ENV: ${APP_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WORKER_ENABLED: ${WORKER_ENABLED:-true}
       WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-5}
       WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-10}
       
-      # Merchant Config (seeded)
       DEFAULT_MERCHANT_ID: ${DEFAULT_MERCHANT_ID:-6758}
-      
     ports:
       - "${APP_PORT:-8000}:8000"
+    
     depends_on:
       db:
         condition: service_healthy
@@ -96,26 +83,6 @@ services:
         condition: service_healthy
     networks:
       - integrator-network
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    # Worker roda no mesmo container (simplificado para VPS única)
-    # Em escala, separar em container dedicado
-    command: >
-      sh -c "
-        echo 'Starting Cardapioweb Integrator...' &&
-        uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 &
-        sleep 5 &&
-        if [ \"$WORKER_ENABLED\" = \"true\" ]; then
-          echo 'Starting background worker...' &&
-          python -m tasks.worker;
-        fi
-      "
 
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -126,7 +93,7 @@ services:
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
       PGADMIN_CONFIG_SERVER_MODE: "False"
     ports:
-      - "${PGADMIN_PORT:-5050}:80"
+      - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     depends_on:
@@ -134,19 +101,13 @@ services:
     networks:
       - integrator-network
     profiles:
-      - debug  # Apenas com: docker-compose --profile debug up
+      - debug
 
 volumes:
   postgres_data:
-    driver: local
   redis_data:
-    driver: local
   pgadmin_data:
-    driver: local
 
 networks:
   integrator-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16

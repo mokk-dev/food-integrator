@@ -5,16 +5,17 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from src.config import settings
-from src.infrastructure.db.connection import close_db, init_db
 from src.infrastructure.cache.redis_client import redis_client
+from src.infrastructure.db.connection import close_db, init_db
 
 # TODO: Import das rotas (serão criadas na Etapa 3)
 # from api.routes import webhooks, health, admin
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ========== STARTUP ==========
-    print(f"🚀 Iniciando Cardapioweb Integrator v15")
+    print("🚀 Iniciando Cardapioweb Integrator v15")
     print(f"   Environment: {settings.app_env}")
     print(f"   Log Level: {settings.log_level}")
 
@@ -24,14 +25,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Database connection failed: {e}")
         raise
-    
+
     try:
         await redis_client.connect()
         print("✅ Redis connected")
     except Exception as e:
         print(f"Redis connection failed: {e}")
         raise
-    
+
     # Cria tabelas se não existirem (dev only - em prod usar migrations)
     # if settings.is_development:
     #     from infrastructure.db.connection import get_engine
@@ -39,17 +40,17 @@ async def lifespan(app: FastAPI):
     #     async with get_engine().begin() as conn:
     #         # Não criamos tabelas aqui - SQL de initdb cuida disso
     #         pass
-    
+
     print("Aplicação pronta para receber requisições")
-    
+
     yield  # Aplicação rodando...
-    
+
     # ========== SHUTDOWN ==========
     print("Encerrando aplicação...")
-    
+
     await close_db()
     await redis_client.disconnect()
-    
+
     print("✅ Conexões fechadas")
 
 
@@ -64,8 +65,8 @@ app = FastAPI(
 )
 
 
-
 # MIDDLEWARE
+
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
@@ -76,19 +77,21 @@ async def correlation_id_middleware(request: Request, call_next):
     response = await call_next(request)
 
     response.headers["X-Correlation-ID"] = correlation_id
-    
+
     return response
 
 
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
-    
+
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains"
+    )
+
     return response
 
 
@@ -104,9 +107,10 @@ async def health_check():
 @app.get("/ready", tags=["Health"])
 async def readiness_check():
     checks = {}
-    
+
     try:
         from infrastructure.db.connection import get_engine
+
         engine = get_engine()
         async with engine.connect() as conn:
             result = await conn.execute("SELECT 1")
@@ -115,8 +119,7 @@ async def readiness_check():
     except Exception as e:
         checks["database"] = f"error: {str(e)}"
         return JSONResponse(
-            status_code=503,
-            content={"status": "not_ready", "checks": checks}
+            status_code=503, content={"status": "not_ready", "checks": checks}
         )
 
     try:
@@ -125,14 +128,10 @@ async def readiness_check():
     except Exception as e:
         checks["redis"] = f"error: {str(e)}"
         return JSONResponse(
-            status_code=503,
-            content={"status": "not_ready", "checks": checks}
+            status_code=503, content={"status": "not_ready", "checks": checks}
         )
-    
-    return {
-        "status": "ready",
-        "checks": checks
-    }
+
+    return {"status": "ready", "checks": checks}
 
 
 # TODO: Registrar rotas na Etapa 3
@@ -143,12 +142,12 @@ async def readiness_check():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     detail = str(exc) if settings.is_development else "Internal server error"
-    
+
     return JSONResponse(
         status_code=500,
         content={
             "error": "internal_error",
             "detail": detail,
-            "correlation_id": getattr(request.state, "correlation_id", None)
-        }
+            "correlation_id": getattr(request.state, "correlation_id", None),
+        },
     )

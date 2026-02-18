@@ -1,5 +1,5 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from src.config import settings
-
 
 # Engine singleton
 _engine = None
@@ -25,7 +24,7 @@ def get_engine():
             pool_size=settings.database_pool_size,
             max_overflow=settings.database_max_overflow,
             pool_pre_ping=True,  # Verifica conexão antes de usar
-            pool_recycle=300,    # Recicla conexões após 5 min
+            pool_recycle=300,  # Recicla conexões após 5 min
             echo=settings.database_echo,
             poolclass=NullPool if settings.app_env == "testing" else None,
         )
