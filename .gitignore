@@ -1,0 +1,27 @@
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+
+### Docker & DB ###
+docker/.env
+
+docker/postgres/data/
+
+### IDEs ###
+.vscode/
+.idea/
+*.swp
+*.swo
+
+### OS ###
+.DS_Store
+Thumbs.db

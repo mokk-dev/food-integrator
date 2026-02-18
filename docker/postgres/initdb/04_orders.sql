@@ -20,7 +20,7 @@ CREATE TABLE orders (
     -- A rastreabilidade é mantida pelo valor lógico, não constraint física
     source_event_id VARCHAR(30) NOT NULL,
     
-    -- Timeline do pedido
+    -- Timeline do pedido (vinda do webhook Cardapioweb)
     created_at TIMESTAMPTZ NOT NULL,
     dispatched_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
@@ -33,7 +33,7 @@ CREATE TABLE orders (
     -- Cliente
     customer_name VARCHAR(255),
     customer_phone VARCHAR(50),
-    delivery_address JSONB,  -- Contém lat/lng para cálculo Python
+    delivery_address JSONB,
     
     -- Conteúdo
     items JSONB,
@@ -66,7 +66,8 @@ CREATE TABLE orders (
     used_for_training BOOLEAN DEFAULT FALSE,
     ml_features_version INT DEFAULT 1,
     
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Metadados do sistema (quando inserimos/atualizamos no DB)
+    inserted_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -134,3 +135,5 @@ COMMENT ON COLUMN orders.distance_zone IS 'Classificação calculada em Python: 
 COMMENT ON COLUMN orders.source_event_id IS 'Referência lógica ao webhook_inbox. Sem FK física para permitir retention policy.';
 COMMENT ON COLUMN orders.api_public_response IS 'Cache raw da API pública Cardapioweb (Fase 1).';
 COMMENT ON COLUMN orders.api_dashboard_response IS 'Cache raw da API dashboard Cardapioweb (Fase 2).';
+COMMENT ON COLUMN orders.inserted_at IS 'Timestamp de inserção no banco de dados (metadado interno).';
+COMMENT ON COLUMN orders.updated_at IS 'Timestamp de última atualização no banco (atualizado via trigger).';

@@ -3,7 +3,7 @@
 -- ============================================
 
 CREATE TABLE order_events (
-    event_id VARCHAR(30) PRIMARY KEY,
+    event_id VARCHAR(30) NOT NULL,
     
     order_id BIGINT NOT NULL REFERENCES orders(id),
     operation_day_id INT NOT NULL,
@@ -17,7 +17,9 @@ CREATE TABLE order_events (
     -- Metadados de rastreabilidade
     inbox_received_at TIMESTAMPTZ NOT NULL,
     
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    PRIMARY KEY (event_id, event_at)
 );
 
 -- Converter em hypertable para séries temporais eficientes
@@ -54,7 +56,8 @@ BEGIN
         t.event_at,
         t.event_type,
         t.status,
-        EXTRACT(EPOCH FROM (t.event_at - t.prev_event_at)) / 60::INT
-    FROM timeline t;
+        COALESCE((EXTRACT(EPOCH FROM (t.event_at - t.prev_event_at)) / 60), 0)::INT
+    FROM timeline t
+    ORDER BY t.event_at;
 END;
 $$ LANGUAGE plpgsql STABLE;

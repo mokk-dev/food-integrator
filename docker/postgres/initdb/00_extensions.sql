@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Configuração de timezone (fixo America/Sao_Paulo)
-ALTER DATABASE delivery_v3 SET timezone TO 'America/Sao_Paulo';
+ALTER DATABASE delivery SET timezone TO 'America/Sao_Paulo';
 SET timezone = 'America/Sao_Paulo';
 
 -- Função de atualização automática de updated_at
