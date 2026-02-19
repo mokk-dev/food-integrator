@@ -8,6 +8,7 @@ from sqlalchemy import text
 from src.config import settings
 from src.infrastructure.cache.redis_client import redis_client
 from src.infrastructure.db.connection import close_db, init_db
+from src.api.routes import webhooks
 
 # TODO: Import das rotas (serão criadas na Etapa 3)
 # from api.routes import webhooks, health, admin
@@ -147,6 +148,13 @@ async def readiness_check():
 # app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 
 
+app.include_router(
+    webhooks.router,
+    prefix="/webhook",
+    tags=["Webhooks"]
+)
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     detail = str(exc) if settings.is_development else "Internal server error"
@@ -161,8 +169,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 @app.exception_handler(404)
-async def not_found_handler(request, exc):
+async def not_found_handler(request: Request, exc):
+    """Handler personalizado para 404."""
     return JSONResponse(
         status_code=404,
-        content={"error": "not_found", "detail": "Resource not found"}
+        content={
+            "error": "not_found",
+            "detail": "Resource not found",
+            "correlation_id": getattr(request.state, "correlation_id", None)
+        }
     )
