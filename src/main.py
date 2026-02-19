@@ -1,8 +1,9 @@
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from src.config import settings
 from src.infrastructure.cache.redis_client import redis_client
@@ -107,31 +108,38 @@ async def health_check():
 @app.get("/ready", tags=["Health"])
 async def readiness_check():
     checks = {}
-
+    status_code = 200
+    
+    # Check DB
     try:
-        from infrastructure.db.connection import get_engine
-
+        from src.infrastructure.db.connection import get_engine
         engine = get_engine()
         async with engine.connect() as conn:
-            result = await conn.execute("SELECT 1")
+            result = await conn.execute(text("SELECT 1"))
             assert result.scalar() == 1
         checks["database"] = "ok"
     except Exception as e:
         checks["database"] = f"error: {str(e)}"
-        return JSONResponse(
-            status_code=503, content={"status": "not_ready", "checks": checks}
-        )
-
+        status_code = 503
+    
+    # Check Redis
     try:
+        from src.infrastructure.cache.redis_client import redis_client
+        if redis_client._client is None:
+            await redis_client.connect()
         await redis_client.client.ping()
         checks["redis"] = "ok"
     except Exception as e:
         checks["redis"] = f"error: {str(e)}"
-        return JSONResponse(
-            status_code=503, content={"status": "not_ready", "checks": checks}
-        )
-
-    return {"status": "ready", "checks": checks}
+        status_code = 503
+    
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ready" if status_code == 200 else "not_ready",
+            "checks": checks
+        }
+    )
 
 
 # TODO: Registrar rotas na Etapa 3
@@ -150,4 +158,11 @@ async def global_exception_handler(request: Request, exc: Exception):
             "detail": detail,
             "correlation_id": getattr(request.state, "correlation_id", None),
         },
+    )
+
+@app.exception_handler(404)
+async def not_found_handler(request, exc):
+    return JSONResponse(
+        status_code=404,
+        content={"error": "not_found", "detail": "Resource not found"}
     )
