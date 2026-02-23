@@ -73,6 +73,11 @@ services:
       WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-10}
       
       DEFAULT_MERCHANT_ID: ${DEFAULT_MERCHANT_ID:-6758}
+
+      CARDAPIOWEB_PUBLIC_BASE_URL: ${CARDAPIOWEB_PUBLIC_BASE_URL}
+      CARDAPIOWEB_DASHBOARD_BASE_URL: ${CARDAPIOWEB_DASHBOARD_BASE_URL}
+      CARDAPIOWEB_PUBLIC_API_KEY: ${CARDAPIOWEB_PUBLIC_API_KEY}
+      CARDAPIOWEB_DASHBOARD_API_KEY: ${CARDAPIOWEB_DASHBOARD_API_KEY}
     ports:
       - "${APP_PORT:-8000}:8000"
     
@@ -102,6 +107,16 @@ services:
       - integrator-network
     profiles:
       - debug
+  
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: integrator-dozzle
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - integrator-network
 
 volumes:
   postgres_data:

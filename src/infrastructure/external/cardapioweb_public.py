@@ -26,6 +26,21 @@ class CardapiowebPublicAPI(BaseAPIClient):
     @api_method
     async def get_order(self, order_id: int) -> Dict[str, Any]:
         """Busca dados completos de um pedido."""
+
+        if settings.app_env != "production" and order_id in [555777, 999001, 999999]:
+            print(f"🛠️ [MOCK MODE] Retornando dados para a order {order_id}")
+            return {
+                "id": order_id,
+                "shortId": str(order_id)[-4:],
+                "type": "delivery",
+                "customer": {"name": "Cliente Teste Local", "phone": "44999999999"},
+                "total": 50.00,
+                "deliveryFee": 5.00,
+                "status": "pending",
+                "createdAt": "2026-02-23T20:00:00Z",
+                "deliveryAddress": {"lat": -23.425, "lng": -51.915}
+            }
+        
         return await self.get(f"/orders/{order_id}")
     
     @api_method

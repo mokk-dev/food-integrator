@@ -9,7 +9,6 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import settings
 from src.core.services.geo_service import GeoService
 from src.infrastructure.db.connection import get_db_session
 from src.infrastructure.external.cardapioweb_dashboard import CardapiowebDashboardAPI
@@ -23,14 +22,15 @@ class OrderEnrichmentService:
     
     def __init__(self):
         self.geo = GeoService()
-        self.merchant_id = settings.default_merchant_id
+        # Removido o self.merchant_id fixo para suportar multi-tenant
     
     async def enrich_order(
         self,
         order_id: int,
         event_type: str,
         order_status: str,
-        raw_payload: Dict[str, Any]
+        raw_payload: Dict[str, Any],
+        merchant_id: str
     ) -> Tuple[bool, Optional[str]]:
         """
         Enriquece pedido chamando APIs do Cardapioweb.
@@ -38,9 +38,10 @@ class OrderEnrichmentService:
         Fluxo:
         1. API Partner (pública) - dados básicos
         2. Calcular distância (se delivery)
-        3. Inserir em 'orders'
-        4. API Plataforma (dashboard) - dados enriquecidos
-        5. Atualizar com delivery info
+        3. Obter ou Criar Expediente (operation_day)
+        4. Inserir em 'orders'
+        5. API Plataforma (dashboard) - dados enriquecidos
+        6. Atualizar com delivery info
         """
         try:
             # 1. API PARTNER (Fase 1)
@@ -55,19 +56,25 @@ class OrderEnrichmentService:
             
             # 3. Calcular distância
             distance_km, distance_zone = await self._calculate_distance(
-                order_data.get("delivery_address", {})
+                order_data.get("delivery_address", {}),
+                merchant_id
             )
             
             # 4. Obter/criar operation_day
-            operation_day_id = await self._get_operation_day_id()
+            operation_day_id = await self._find_operation_day(merchant_id)
+            
             if not operation_day_id:
-                return False, "Não foi possível obter operation_day"
+                operation_day_id = await self._create_operation_day(merchant_id)
+                
+            if not operation_day_id:
+                return False, f"Não foi possível obter ou criar operation_day para o merchant {merchant_id}"
             
             # 5. Inserir em 'orders' (Fase 1)
             async with get_db_session() as session:
                 await self._insert_order(
-                    session,
+                    session=session,
                     order_id=order_id,
+                    merchant_id=merchant_id,
                     operation_day_id=operation_day_id,
                     order_data=order_data,
                     distance_km=distance_km,
@@ -97,10 +104,24 @@ class OrderEnrichmentService:
     def _extract_from_partner(self, data: Dict) -> Dict:
         """Extrai dados normalizados da API Partner."""
         address = data.get("deliveryAddress") or data.get("delivery_address") or {}
+
+        raw_uid = data.get("uid") or data.get("uuid") or data.get("id")
+        raw_display = data.get("shortId") or data.get("displayId")
+
+        display_id_val = int(raw_display) if raw_display else None
+
+        raw_created = data.get("createdAt") or data.get("created_at")
+
+        if raw_created:
+            try:
+                # Substituímos o "Z" (Zulu/UTC) pelo offset padrão que o Python compreende perfeitamente
+                created_dt = datetime.fromisoformat(str(raw_created).replace("Z", "+00:00"))
+            except ValueError:
+                pass
         
         return {
-            "uid": data.get("uid") or data.get("uuid") or data.get("id"),
-            "display_id": data.get("shortId") or data.get("displayId"),
+            "uid": str(raw_uid) if raw_uid else None,
+            "display_id": display_id_val,
             "order_type": self._normalize_order_type(data.get("type")),
             "sales_channel": data.get("salesChannel") or data.get("platform"),
             "customer_name": self._extract_customer_name(data),
@@ -108,7 +129,7 @@ class OrderEnrichmentService:
             "total_value": data.get("total") or data.get("totalPrice"),
             "delivery_fee": data.get("deliveryFee") or data.get("deliveryPrice"),
             "status": self._normalize_status(data.get("status")),
-            "created_at": data.get("createdAt") or data.get("created_at"),
+            "created_at": created_dt,
             "items": data.get("items") or [],
             "payments": data.get("payments") or [],
             "delivery_address": address,
@@ -159,10 +180,10 @@ class OrderEnrichmentService:
     
     async def _calculate_distance(
         self,
-        address: Dict
+        address: Dict,
+        merchant_id: str
     ) -> Tuple[Optional[float], Optional[str]]:
-        """Calcula distância do pedido."""
-        # Buscar coordenadas do merchant
+        """Calcula distância do pedido baseada no merchant."""
         async with get_db_session() as session:
             result = await session.execute(
                 text("""
@@ -172,7 +193,7 @@ class OrderEnrichmentService:
                     FROM merchants 
                     WHERE merchant_id = :id
                 """),
-                {"id": self.merchant_id}
+                {"id": merchant_id}
             )
             merchant = result.fetchone()
             
@@ -181,13 +202,11 @@ class OrderEnrichmentService:
             
             m_lat, m_lng, thresh_near, thresh_med = merchant
         
-        # Extrair coordenadas do cliente
         cust_lat, cust_lng = self.geo.extract_coordinates_from_address(address)
         
         if cust_lat is None or cust_lng is None:
             return None, None
         
-        # Calcular
         distance = self.geo.haversine(m_lat, m_lng, cust_lat, cust_lng)
         zone = self.geo.classify_distance_zone(
             distance,
@@ -197,21 +216,42 @@ class OrderEnrichmentService:
         
         return distance, zone
     
-    async def _get_operation_day_id(self) -> Optional[int]:
-        """Obtém ID do operation_day atual ou cria novo."""
+    async def _find_operation_day(self, merchant_id: str) -> Optional[int]:
+        """Busca o ID do operation_day atual (aberto) para o merchant."""
         async with get_db_session() as session:
-            # Buscar aberto
             result = await session.execute(
-                text("SELECT id FROM get_open_operation_day(:merchant_id)"),
-                {"merchant_id": self.merchant_id}
+                text("SELECT operation_day_id FROM get_open_operation_day(:merchant_id)"),
+                {"merchant_id": merchant_id}
             )
             row = result.fetchone()
             
-            if row:
-                return row[0] if isinstance(row, tuple) else getattr(row, 'id', None)
+            if row and row[0]:
+                return row[0]
+            return None
+
+    async def _create_operation_day(self, merchant_id: str) -> Optional[int]:
+        """Cria um novo operation_day usando os horários padrão do merchant."""
+        async with get_db_session() as session:
+            query = text("""
+                INSERT INTO operation_days (
+                    merchant_id, operation_day, start_time, end_time, 
+                    opened_at, delivery_capacity
+                )
+                SELECT 
+                    CAST(:merchant_id AS VARCHAR), CURRENT_DATE, default_start_time, default_end_time, 
+                    NOW(), default_delivery_capacity
+                FROM merchants 
+                WHERE merchant_id = CAST(:merchant_id AS VARCHAR)
+                RETURNING id;
+            """)
+            result = await session.execute(query, {"merchant_id": merchant_id})
+            new_row = result.fetchone()
             
-            # Criar novo (simplificado - em produção teria lógica mais robusta)
-            # Aqui retornamos None para indicar que precisa criar
+            if new_row:
+                await session.commit()
+                print(f"ℹ️ Novo operation_day criado automaticamente para merchant {merchant_id}")
+                return new_row[0]
+                
             return None
     
     def _should_call_dashboard(self, order_data: Dict) -> bool:
@@ -226,6 +266,7 @@ class OrderEnrichmentService:
         self,
         session: AsyncSession,
         order_id: int,
+        merchant_id: str,
         operation_day_id: int,
         order_data: Dict,
         distance_km: Optional[float],
@@ -263,7 +304,7 @@ class OrderEnrichmentService:
                 "id": order_id,
                 "uid": order_data.get("uid"),
                 "display_id": order_data.get("display_id"),
-                "merchant_id": self.merchant_id,
+                "merchant_id": merchant_id,
                 "operation_day_id": operation_day_id,
                 "source_event_id": f"api_partner_{order_id}",
                 "created_at": order_data.get("created_at") or datetime.now(),
@@ -292,7 +333,6 @@ class OrderEnrichmentService:
         """Atualiza pedido com dados da API Plataforma."""
         delivery_info = self._extract_from_dashboard(dashboard_data)
         
-        # Se não tem delivery info, não atualiza
         if not any(delivery_info.values()):
             return
         

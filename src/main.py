@@ -9,6 +9,7 @@ from src.config import settings
 from src.infrastructure.cache.redis_client import redis_client
 from src.infrastructure.db.connection import close_db, init_db
 from src.api.routes import webhooks
+from src.core.logger import logger
 
 # TODO: Import das rotas (serão criadas na Etapa 3)
 # from api.routes import webhooks, health, admin
@@ -17,22 +18,20 @@ from src.api.routes import webhooks
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ========== STARTUP ==========
-    print("🚀 Iniciando Cardapioweb Integrator v15")
-    print(f"   Environment: {settings.app_env}")
-    print(f"   Log Level: {settings.log_level}")
+    logger.info("startup.starting", version="15.0.0", env=settings.app_env)
 
     try:
         await init_db()
-        print("Database connected")
+        logger.info("startup.database_connected")
     except Exception as e:
-        print(f"Database connection failed: {e}")
+        logger.error("startup.database_failed", error=str(e))
         raise
 
     try:
         await redis_client.connect()
-        print("✅ Redis connected")
+        logger.info("startup.redis_connected")
     except Exception as e:
-        print(f"Redis connection failed: {e}")
+        logger.error("startup.redis_failed", error=str(e))
         raise
 
     # Cria tabelas se não existirem (dev only - em prod usar migrations)
@@ -43,17 +42,17 @@ async def lifespan(app: FastAPI):
     #         # Não criamos tabelas aqui - SQL de initdb cuida disso
     #         pass
 
-    print("Aplicação pronta para receber requisições")
+    logger.info("startup.ready")
 
-    yield  # Aplicação rodando...
+    yield
 
     # ========== SHUTDOWN ==========
-    print("Encerrando aplicação...")
+    logger.info("shutdown.starting")
 
     await close_db()
     await redis_client.disconnect()
 
-    print("✅ Conexões fechadas")
+    logger.info("shutdown.connections_closed")
 
 
 app = FastAPI(

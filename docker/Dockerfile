@@ -56,7 +56,7 @@ COPY pyproject.toml .
 COPY src/ ./src/
 
 # Garantir que o pacote está registrado (symlinks)
-RUN pip install -e . --no-deps
+RUN pip install . --no-deps
 
 # Permissões
 RUN mkdir -p /app/logs && chown -R appuser:appgroup /app /opt/venv

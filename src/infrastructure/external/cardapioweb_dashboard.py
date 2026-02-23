@@ -29,6 +29,16 @@ class CardapiowebDashboardAPI(BaseAPIClient):
         Busca detalhes completos do pedido na plataforma.
         Endpoint: /v1/company/orders/{orderId}
         """
+
+        if settings.app_env != "production" and order_id in [555777, 999001, 999999]:
+            print(f"🛠️ [MOCK MODE] Retornando dados para a order {order_id}")
+            return {
+                "delivery": {
+                    "driver": {"name": "Motoboy Mock", "phone": "44888888888"},
+                    "route": "Rota 1"
+                }
+            }
+            
         return await self.get(f"/v1/company/orders/{order_id}")
     
     @api_method

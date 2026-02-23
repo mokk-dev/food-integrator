@@ -12,6 +12,31 @@ from fastapi import Header, HTTPException, Request, status
 from src.config import settings
 from src.infrastructure.cache.redis_client import redis_client
 
+async def verify_payload_size(request: Request):
+    """Bloqueia payloads maiores que 500KB para evitar Memory Exhaustion (DDoS)."""
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > 512_000:  # 500 KB
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Payload too large"
+        )
+    
+async def rate_limiter(request: Request):
+    """Limita a quantidade de requisições por IP usando Redis."""
+    await redis_client.connect()
+    
+    # Usa o IP do cliente como chave. Em produção com proxy (Nginx/Cloudflare), use X-Forwarded-For
+    client_ip = request.client.host if request.client else "unknown"
+    key = f"rate_limit:webhook:{client_ip}"
+    
+    # Limite de 100 requisições a cada 10 segundos por IP
+    allowed, remaining = await redis_client.check_rate_limit(key, max_requests=100, window_seconds=10)
+    
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please slow down."
+        )
 
 async def verify_webhook_token(request: Request) -> bool:
     """

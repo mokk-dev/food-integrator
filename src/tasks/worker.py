@@ -6,12 +6,15 @@ import asyncio
 import json
 import signal
 import sys
+import structlog
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
+
+from src.core.logger import logger
 from src.config import settings
 from src.core.services.order_enrichment import OrderEnrichmentService
 from src.infrastructure.cache.redis_client import redis_client
@@ -32,6 +35,7 @@ class WebhookWorker:
     
     async def start(self):
         """Inicia loop principal."""
+        import time
         self.running = True
         
         loop = asyncio.get_event_loop()
@@ -39,20 +43,29 @@ class WebhookWorker:
             loop.add_signal_handler(sig, self.stop)
         
         await redis_client.connect()
-        
-        print(f"🔄 Worker iniciado (intervalo: {self.poll_interval}s)")
+        print(f"🔄 Worker iniciado (intervalo: {self.poll_interval}s | batch: {self.batch_size})")
+
+        logger.info("worker.started", interval=self.poll_interval, batch_size=self.batch_size)
         
         while self.running:
             try:
+                start_time = time.time()
                 processed = await self._process_batch()
+                duration = time.time() - start_time
                 
                 if processed > 0:
-                    print(f"✅ Processados {processed} eventos")
+                    logger.info("worker.batch_processed", 
+                                processed_count=processed, 
+                                max_batch=self.batch_size, 
+                                duration_seconds=round(duration, 2))
+                    
+                    if processed == self.batch_size:
+                        logger.warning("worker.queue_saturated", msg="Lote cheio processado. Fila pode estar atrasada.")
                 else:
                     await asyncio.sleep(self.poll_interval)
                     
             except Exception as e:
-                print(f"❌ Erro no worker: {e}")
+                logger.error("worker.batch_error", error=str(e), exc_info=True)
                 await asyncio.sleep(self.poll_interval)
         
         print("🛑 Worker encerrado")
@@ -105,41 +118,69 @@ class WebhookWorker:
             event_id, order_id, event_type, order_status,
             payload, received_at, attempts
         ) = event
+
+        log = logger.bind(event_id=event_id, order_id=order_id, event_type=event_type)
         
         try:
-            print(f"📝 {event_id}: {event_type} (order: {order_id})")
+            log.info("event.processing_started")
+            if isinstance(payload, dict):
+                payload_dict = payload
+            elif isinstance(payload, str):
+                payload_dict = json.loads(payload)
+            else:
+                payload_dict = {}
+
+            merchant_id = payload_dict.get("merchant_id", self.merchant_id)
             
-            payload_dict = json.loads(payload) if payload else {}
-            
-            # ETAPA 4: Enriquecimento
             if event_type == "ORDER_CREATED":
                 enrichment = OrderEnrichmentService()
                 success, error = await enrichment.enrich_order(
                     order_id=order_id,
                     event_type=event_type,
                     order_status=order_status or "pending",
-                    raw_payload=payload_dict
+                    raw_payload=payload_dict,
+                    merchant_id=merchant_id
                 )
                 
                 if not success:
+                    log.error("event.enrichment_failed", error=error)
                     raise Exception(f"Enrichment failed: {error}")
                 
-                print(f"✅ Order {order_id} enriquecido")
+                log.info("event.order_enriched")
             
             elif event_type == "ORDER_STATUS_UPDATED":
-                # TODO: Atualizar status em orders existente
-                print(f"⚠️  Status update não implementado: {order_id}")
-                pass
+                new_status = payload_dict.get("new_status")
+                if new_status:
+                    # Atualiza o status do pedido existente
+                    is_cancelled = new_status.lower() in ["cancelled", "canceled", "cancelado"]
+                    cancel_query_part = ", cancelled_at = NOW()" if is_cancelled else ""
+
+                    await session.execute(
+                        text(f"""
+                            UPDATE orders 
+                            SET status = :status, 
+                                updated_at = NOW(),
+                                status_changed_at = NOW()
+                                {cancel_query_part}
+                            WHERE id = :order_id
+                        """),
+                        {"status": new_status, "order_id": order_id}
+                    )
+                    if is_cancelled:
+                        log.info("event.order_cancelled", new_status=new_status)
+                    else:
+                        log.info("event.status_updated", new_status=new_status)
+                else:
+                    log.warning("event.missing_new_status", payload=payload_dict)
             
             else:
-                print(f"ℹ️  Evento não tratado: {event_type}")
+                log.info("event.ignored", msg="Evento não tratado")
             
-            # Marcar como processado
             await self._mark_processed(session, event_id)
             return True
             
         except Exception as e:
-            print(f"❌ Falha em {event_id}: {e}")
+            log.error("event.processing_failed", error=str(e), exc_info=True)
             await self._mark_failed(session, event_id, str(e))
             return False
     

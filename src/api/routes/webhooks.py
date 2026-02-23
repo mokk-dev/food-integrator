@@ -11,6 +11,8 @@ from src.api.dependencies import (
     check_idempotency,
     get_correlation_id,
     verify_webhook_token,
+    verify_payload_size,
+    rate_limiter,
 )
 from src.config import settings
 from src.core.models.webhook import WebhookPayload, WebhookResponse
@@ -23,6 +25,7 @@ router = APIRouter()
     "/orders",
     response_model=WebhookResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(verify_payload_size), Depends(rate_limiter)],
     summary="Recebe webhooks de pedidos do Cardapioweb",
     description="""
     Endpoint para receber eventos de pedidos do Cardapioweb.
@@ -40,7 +43,7 @@ router = APIRouter()
 )
 async def receive_order_webhook(
     request: Request,
-    payload: Dict[str, Any],  # Recebe como dict primeiro para flexibilidade
+    payload: Dict[str, Any],
     correlation_id: str = Depends(get_correlation_id),
     _token_valid: bool = Depends(verify_webhook_token)
 ):
