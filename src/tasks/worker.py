@@ -13,16 +13,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.core.services.order_enrichment import OrderEnrichmentService
 from src.infrastructure.cache.redis_client import redis_client
 from src.infrastructure.db.connection import get_db_session
 
 
 class WebhookWorker:
     """
-    Worker assíncrono para processamento de webhooks pendentes.
-    
-    Etapa 3 (atual): Apenas polling e logging.
-    Etapa 4 (futuro): Enriquecimento de pedidos, chamadas API externas.
+    Worker assíncrono para processamento de webhooks.
     """
     
     def __init__(self):
@@ -30,19 +28,19 @@ class WebhookWorker:
         self.poll_interval = settings.worker_poll_interval
         self.batch_size = settings.worker_batch_size
         self.max_retries = settings.worker_max_retries
+        self.merchant_id = settings.default_merchant_id
     
     async def start(self):
-        """Inicia loop principal do worker."""
+        """Inicia loop principal."""
         self.running = True
         
-        # Setup signal handlers para graceful shutdown
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self.stop)
         
         await redis_client.connect()
         
-        print(f"🔄 Worker iniciado (intervalo: {self.poll_interval}s, batch: {self.batch_size})")
+        print(f"🔄 Worker iniciado (intervalo: {self.poll_interval}s)")
         
         while self.running:
             try:
@@ -51,7 +49,6 @@ class WebhookWorker:
                 if processed > 0:
                     print(f"✅ Processados {processed} eventos")
                 else:
-                    # Sem eventos, aguardar
                     await asyncio.sleep(self.poll_interval)
                     
             except Exception as e:
@@ -61,38 +58,32 @@ class WebhookWorker:
         print("🛑 Worker encerrado")
     
     def stop(self):
-        """Sinaliza parada graceful."""
+        """Sinaliza parada."""
         print("⚠️  Recebido sinal de parada...")
         self.running = False
     
     async def _process_batch(self) -> int:
-        """
-        Processa um lote de eventos pendentes.
-        
-        Retorna: número de eventos processados
-        """
+        """Processa lote de eventos pendentes."""
         processed_count = 0
         
         async with get_db_session() as session:
-            # Buscar eventos pendentes
-            events = await self._fetch_pending_events(session)
+            events = await self._fetch_pending(session)
             
             for event in events:
                 if not self.running:
                     break
                 
-                success = await self._process_single_event(session, event)
+                success = await self._process_event(session, event)
                 if success:
                     processed_count += 1
         
         return processed_count
     
-    async def _fetch_pending_events(self, session: AsyncSession) -> list:
-        """Busca eventos pendentes do inbox."""
+    async def _fetch_pending(self, session: AsyncSession) -> list:
+        """Busca eventos pendentes."""
         query = text("""
-            SELECT 
-                event_id, order_id, event_type, order_status,
-                payload, received_at, processing_attempts
+            SELECT event_id, order_id, event_type, order_status,
+                   payload, received_at, processing_attempts
             FROM webhook_inbox
             WHERE status = 'pending'
               AND processing_attempts < :max_retries
@@ -108,35 +99,43 @@ class WebhookWorker:
         
         return result.fetchall()
     
-    async def _process_single_event(
-        self,
-        session: AsyncSession,
-        event: tuple
-    ) -> bool:
-        """
-        Processa evento individual.
-        
-        Etapa 3: Apenas marca como 'processed' e loga.
-        Etapa 4: Aqui virá o enriquecimento de pedidos.
-        """
+    async def _process_event(self, session: AsyncSession, event: tuple) -> bool:
+        """Processa evento individual."""
         (
             event_id, order_id, event_type, order_status,
             payload, received_at, attempts
         ) = event
         
         try:
-            print(f"📝 Processando: {event_id} (order: {order_id}, type: {event_type})")
+            print(f"📝 {event_id}: {event_type} (order: {order_id})")
             
-            # TODO Etapa 4: 
-            # - Chamar API pública Cardapioweb
-            # - Enriquecer dados do pedido
-            # - Inserir em 'orders'
-            # - Chamar API dashboard (se necessário)
+            payload_dict = json.loads(payload) if payload else {}
             
-            # Por enquanto, apenas marcar como processado
+            # ETAPA 4: Enriquecimento
+            if event_type == "ORDER_CREATED":
+                enrichment = OrderEnrichmentService()
+                success, error = await enrichment.enrich_order(
+                    order_id=order_id,
+                    event_type=event_type,
+                    order_status=order_status or "pending",
+                    raw_payload=payload_dict
+                )
+                
+                if not success:
+                    raise Exception(f"Enrichment failed: {error}")
+                
+                print(f"✅ Order {order_id} enriquecido")
+            
+            elif event_type == "ORDER_STATUS_UPDATED":
+                # TODO: Atualizar status em orders existente
+                print(f"⚠️  Status update não implementado: {order_id}")
+                pass
+            
+            else:
+                print(f"ℹ️  Evento não tratado: {event_type}")
+            
+            # Marcar como processado
             await self._mark_processed(session, event_id)
-            
-            print(f"✅ Concluído: {event_id}")
             return True
             
         except Exception as e:
@@ -146,14 +145,16 @@ class WebhookWorker:
     
     async def _mark_processed(self, session: AsyncSession, event_id: str):
         """Marca evento como processado."""
-        query = text("""
-            UPDATE webhook_inbox
-            SET status = 'processed',
-                processed_at = NOW(),
-                processing_attempts = processing_attempts + 1
-            WHERE event_id = :event_id
-        """)
-        await session.execute(query, {"event_id": event_id})
+        await session.execute(
+            text("""
+                UPDATE webhook_inbox
+                SET status = 'processed',
+                    processed_at = NOW(),
+                    processing_attempts = processing_attempts + 1
+                WHERE event_id = :event_id
+            """),
+            {"event_id": event_id}
+        )
     
     async def _mark_failed(
         self,
@@ -162,20 +163,21 @@ class WebhookWorker:
         error: str
     ):
         """Marca evento como falho."""
-        query = text("""
-            UPDATE webhook_inbox
-            SET status = 'failed',
-                last_error = :error,
-                processing_attempts = processing_attempts + 1,
-                processed_at = NOW()
-            WHERE event_id = :event_id
-        """)
-        await session.execute(query, {"event_id": event_id, "error": error})
+        await session.execute(
+            text("""
+                UPDATE webhook_inbox
+                SET status = 'failed',
+                    last_error = :error,
+                    processing_attempts = processing_attempts + 1,
+                    processed_at = NOW()
+                WHERE event_id = :event_id
+            """),
+            {"event_id": event_id, "error": error[:500]}  # Limitar tamanho
+        )
 
 
-# Entry point para execução standalone
 async def main():
-    """Função principal para rodar worker."""
+    """Entry point."""
     worker = WebhookWorker()
     await worker.start()
 
