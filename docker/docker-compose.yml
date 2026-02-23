@@ -57,7 +57,7 @@ services:
     container_name: integrator-app
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme_in_production}@db:5432/${POSTGRES_DB:-delivery}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dbpass}@db:5432/${POSTGRES_DB:-delivery}
       DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-20}
       DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-10}
       
@@ -79,8 +79,7 @@ services:
       CARDAPIOWEB_PUBLIC_API_KEY: ${CARDAPIOWEB_PUBLIC_API_KEY}
       CARDAPIOWEB_DASHBOARD_API_KEY: ${CARDAPIOWEB_DASHBOARD_API_KEY}
     ports:
-      - "${APP_PORT:-8000}:8000"
-    
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -96,7 +95,7 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@localhost.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_SERVER_MODE: "True"
     ports:
       - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
     volumes:
@@ -107,14 +106,49 @@ services:
       - integrator-network
     profiles:
       - debug
-  
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: integrator-metabase
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${POSTGRES_DB:-delivery}
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${POSTGRES_USER:-postgres}
+      MB_DB_PASS: ${POSTGRES_PASSWORD}
+      MB_DB_HOST: db
+    volumes:
+      - metabase_data:/metabase.db
+    depends_on:
+      - db
+    networks:
+      - integrator-network
+
   dozzle:
     image: amir20/dozzle:latest
     container_name: integrator-dozzle
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DOZZLE_AUTH_PROVIDER: simple
+      DOZZLE_USERNAME: ${DOZZLE_USER:-admin}
+      DOZZLE_PASSWORD: ${DOZZLE_PASSWORD:-password}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    networks:
+      - integrator-network
+  
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: integrator-tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     networks:
       - integrator-network
 
@@ -122,6 +156,7 @@ volumes:
   postgres_data:
   redis_data:
   pgadmin_data:
+  metabase_data:
 
 networks:
   integrator-network:
