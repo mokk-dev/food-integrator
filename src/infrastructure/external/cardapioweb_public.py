@@ -18,10 +18,12 @@ class CardapiowebPublicAPI(BaseAPIClient):
     
     def __init__(self):
         super().__init__(
-            base_url=settings.cardapioweb_public_base_url,
-            api_key=settings.cardapioweb_public_api_key,
-            timeout=settings.cardapioweb_api_timeout
+            base_url=settings.cardapioweb_public_base_url
         )
+        self.client.headers.update({
+            "X-API-KEY": settings.cardapioweb_public_api_key,
+            "Accept": "application/json"
+        })
     
     @api_method
     async def get_order(self, order_id: int) -> Dict[str, Any]:

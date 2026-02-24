@@ -19,9 +19,13 @@ class CardapiowebDashboardAPI(BaseAPIClient):
     def __init__(self):
         super().__init__(
             base_url=settings.cardapioweb_dashboard_base_url,
-            api_key=settings.cardapioweb_dashboard_api_key,
             timeout=settings.cardapioweb_api_timeout
         )
+        self.client.headers.update({
+            "Authorization": settings.cardapioweb_dashboard_api_key,
+            "CompanyId": str(settings.default_merchant_id),
+            "Accept": "application/json"
+        })
     
     @api_method
     async def get_order_details(self, order_id: int) -> Dict[str, Any]:
