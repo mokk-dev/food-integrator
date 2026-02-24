@@ -149,6 +149,40 @@ services:
     networks:
       - integrator-network
 
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: production
+    container_name: integrator-worker
+    restart: unless-stopped
+    command: python -m src.tasks.worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres-delivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-delivery}
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-20}
+      DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-10}
+      
+      REDIS_URL: redis://redis:6379/0
+      
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-5}
+      WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-10}
+      
+      DEFAULT_MERCHANT_ID: ${DEFAULT_MERCHANT_ID:-6758}
+      
+      CARDAPIOWEB_PUBLIC_BASE_URL: ${CARDAPIOWEB_PUBLIC_BASE_URL}
+      CARDAPIOWEB_DASHBOARD_BASE_URL: ${CARDAPIOWEB_DASHBOARD_BASE_URL}
+      CARDAPIOWEB_PUBLIC_API_KEY: ${CARDAPIOWEB_PUBLIC_API_KEY}
+      CARDAPIOWEB_DASHBOARD_API_KEY: ${CARDAPIOWEB_DASHBOARD_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - integrator-network
+
 volumes:
   postgres_data:
   redis_data:
