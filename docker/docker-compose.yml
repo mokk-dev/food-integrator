@@ -104,8 +104,6 @@ services:
       - db
     networks:
       - integrator-network
-    profiles:
-      - debug
 
   metabase:
     image: metabase/metabase:latest
@@ -133,10 +131,9 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./dozzle_data:/data
     environment:
       DOZZLE_AUTH_PROVIDER: simple
-      DOZZLE_USERNAME: ${DOZZLE_USER:-admin}
-      DOZZLE_PASSWORD: ${DOZZLE_PASSWORD:-password}
     ports:
       - "127.0.0.1:8080:8080"
     networks:
