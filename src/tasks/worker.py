@@ -89,7 +89,12 @@ class WebhookWorker:
                 success = await self._process_event(session, event)
                 if success:
                     processed_count += 1
-        
+            
+            # --- ADICIONADO: Commit em lote para persistir as alterações na caixa de entrada ---
+            if events:
+                await session.commit()
+            # ---------------------------------------------------------------------------------
+                
         return processed_count
     
     async def _fetch_pending(self, session: AsyncSession) -> list:
@@ -149,7 +154,10 @@ class WebhookWorker:
                 log.info("event.order_enriched")
             
             elif event_type == "ORDER_STATUS_UPDATED":
-                new_status = payload_dict.get("new_status")
+                # --- ADICIONADO: Compatibilidade perfeita com o JSON da Cardapioweb ---
+                new_status = payload_dict.get("order_status") or payload_dict.get("new_status")
+                # ----------------------------------------------------------------------
+                
                 if new_status:
                     # Atualiza o status do pedido existente
                     is_cancelled = new_status.lower() in ["cancelled", "canceled", "cancelado"]
