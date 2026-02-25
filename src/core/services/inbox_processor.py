@@ -83,6 +83,14 @@ class InboxProcessor:
             # Preparar payload JSONB
             raw_payload = payload.raw_payload if payload.raw_payload else payload.model_dump()
             
+            # --- CONVERSÃO EXPLÍCITA (CASTING) ---
+            # Garante que o driver asyncpg receba exatamente os tipos nativos esperados pelas colunas
+            safe_event_id = str(payload.event_id)
+            safe_order_id = int(payload.order_id)
+            safe_event_type = str(payload.event_type)
+            safe_order_status = str(payload.order_status) if payload.order_status else None
+            # -------------------------------------
+            
             query = text("""
                 INSERT INTO webhook_inbox (
                     event_id, order_id, event_type, order_status,
@@ -98,10 +106,10 @@ class InboxProcessor:
             result = await session.execute(
                 query,
                 {
-                    "event_id": payload.event_id,
-                    "order_id": payload.order_id,
-                    "event_type": payload.event_type,
-                    "order_status": payload.order_status,
+                    "event_id": safe_event_id,
+                    "order_id": safe_order_id,
+                    "event_type": safe_event_type,
+                    "order_status": safe_order_status,
                     "payload": json.dumps(raw_payload, default=str)
                 }
             )

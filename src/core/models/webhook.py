@@ -2,9 +2,9 @@
 # PYDANTIC MODELS - WEBHOOK CARDAPIOWEB
 # ============================================
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -15,10 +15,22 @@ class WebhookPayload(BaseModel):
     Campos obrigatórios para todos os eventos.
     """
     event_id: str = Field(..., description="ID único do evento (para idempotência)")
-    order_id: int = Field(..., description="ID do pedido no Cardapioweb")
+    
+    # Atualizado: Cardapioweb pode mandar o ID como inteiro ou string
+    order_id: Union[int, str] = Field(..., description="ID do pedido no Cardapioweb")
     event_type: str = Field(..., description="Tipo do evento: ORDER_CREATED, ORDER_STATUS_UPDATED, etc.")
-    merchant_id: str = Field(..., description="ID do estabelecimento")
-    timestamp: datetime = Field(..., description="Timestamp do evento no Cardapioweb")
+    
+    # Atualizado: Evita erro de tipagem caso o ID da loja venha como número
+    merchant_id: Union[int, str] = Field(..., description="ID do estabelecimento")
+    
+    # Atualizado: Cardapioweb envia a data neste campo
+    created_at: Optional[datetime] = Field(None, description="Data e hora original do evento no Cardapioweb")
+    
+    # Atualizado: Se o parceiro não enviar, geramos o nosso próprio timestamp interno para não quebrar
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc), 
+        description="Timestamp do evento no nosso sistema"
+    )
     
     # Campos opcionais presentes em alguns eventos
     order_status: Optional[str] = Field(None, description="Status atual do pedido")
@@ -47,12 +59,12 @@ class WebhookPayload(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "event_id": "evt_123456789",
-                "order_id": 12345,
+                "event_id": "1psu56ytdo8ztk53rir",
+                "order_id": 182564627,
                 "event_type": "ORDER_CREATED",
-                "merchant_id": "6758",
-                "timestamp": "2026-02-19T20:00:00Z",
-                "order_status": "pending"
+                "merchant_id": 6758,
+                "created_at": "2026-02-09T18:30:41-03:00",
+                "order_status": "waiting_confirmation"
             }
         }
 
