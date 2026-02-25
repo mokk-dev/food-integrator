@@ -111,7 +111,8 @@ class OrderEnrichmentService:
         display_id_val = int(raw_display) if raw_display else None
 
         raw_created = data.get("createdAt") or data.get("created_at")
-
+        
+        created_dt = None
         if raw_created:
             try:
                 # Substituímos o "Z" (Zulu/UTC) pelo offset padrão que o Python compreende perfeitamente
@@ -185,6 +186,9 @@ class OrderEnrichmentService:
     ) -> Tuple[Optional[float], Optional[str]]:
         """Calcula distância do pedido baseada no merchant."""
         async with get_db_session() as session:
+            # Cast explícito para string
+            safe_merchant_id = str(merchant_id)
+            
             result = await session.execute(
                 text("""
                     SELECT address_lat, address_lng, 
@@ -193,7 +197,7 @@ class OrderEnrichmentService:
                     FROM merchants 
                     WHERE merchant_id = :id
                 """),
-                {"id": merchant_id}
+                {"id": safe_merchant_id}
             )
             merchant = result.fetchone()
             
@@ -219,9 +223,12 @@ class OrderEnrichmentService:
     async def _find_operation_day(self, merchant_id: str) -> Optional[int]:
         """Busca o ID do operation_day atual (aberto) para o merchant."""
         async with get_db_session() as session:
+            # Cast explícito para string
+            safe_merchant_id = str(merchant_id)
+            
             result = await session.execute(
                 text("SELECT operation_day_id FROM get_open_operation_day(:merchant_id)"),
-                {"merchant_id": merchant_id}
+                {"merchant_id": safe_merchant_id}
             )
             row = result.fetchone()
             
@@ -232,6 +239,9 @@ class OrderEnrichmentService:
     async def _create_operation_day(self, merchant_id: str) -> Optional[int]:
         """Cria um novo operation_day usando os horários padrão do merchant."""
         async with get_db_session() as session:
+            # Cast explícito para string
+            safe_merchant_id = str(merchant_id)
+            
             query = text("""
                 INSERT INTO operation_days (
                     merchant_id, operation_day, start_time, end_time, 
@@ -244,7 +254,7 @@ class OrderEnrichmentService:
                 WHERE merchant_id = CAST(:merchant_id AS VARCHAR)
                 RETURNING id;
             """)
-            result = await session.execute(query, {"merchant_id": merchant_id})
+            result = await session.execute(query, {"merchant_id": safe_merchant_id})
             new_row = result.fetchone()
             
             if new_row:
@@ -274,6 +284,12 @@ class OrderEnrichmentService:
         api_response: Dict
     ):
         """Insere pedido na tabela orders."""
+        
+        # Garante que a data seja serializada corretamente pelo asyncpg
+        created_at_val = order_data.get("created_at")
+        if not created_at_val:
+            created_at_val = datetime.now()
+        
         query = text("""
             INSERT INTO orders (
                 id, uid, display_id, merchant_id, operation_day_id,
@@ -301,13 +317,13 @@ class OrderEnrichmentService:
         await session.execute(
             query,
             {
-                "id": order_id,
+                "id": int(order_id),
                 "uid": order_data.get("uid"),
                 "display_id": order_data.get("display_id"),
-                "merchant_id": merchant_id,
-                "operation_day_id": operation_day_id,
+                "merchant_id": str(merchant_id),
+                "operation_day_id": int(operation_day_id),
                 "source_event_id": f"api_partner_{order_id}",
-                "created_at": order_data.get("created_at") or datetime.now(),
+                "created_at": created_at_val,
                 "order_type": order_data.get("order_type", "delivery"),
                 "sales_channel": order_data.get("sales_channel"),
                 "customer_name": order_data.get("customer_name"),
@@ -351,7 +367,7 @@ class OrderEnrichmentService:
         await session.execute(
             query,
             {
-                "order_id": order_id,
+                "order_id": int(order_id),
                 "delivery_man_name": delivery_info.get("delivery_man_name"),
                 "delivery_man_phone": delivery_info.get("delivery_man_phone"),
                 "delivery_route": delivery_info.get("delivery_route"),
