@@ -270,7 +270,7 @@ class OrderEnrichmentService:
             return False
         
         status = order_data.get("status", "")
-        return status in ["released", "dispatched", "in_transit", "delivered", "ready", "confirmed"]
+        return status in ["released", "dispatched", "in_transit", "delivered", "ready", "confirmed", "closed"]
     
     async def _insert_order(
         self,
