@@ -20,6 +20,10 @@ from src.core.services.order_enrichment import OrderEnrichmentService
 from src.infrastructure.cache.redis_client import redis_client
 from src.infrastructure.db.connection import get_db_session
 
+from src.infrastructure.external.cardapioweb_dashboard import CardapiowebDashboardAPI
+
+from src.infrastructure.external.cardapioweb_auth import CardapiowebAuthManager
+
 
 class WebhookWorker:
     """
@@ -43,6 +47,13 @@ class WebhookWorker:
             loop.add_signal_handler(sig, self.stop)
         
         await redis_client.connect()
+
+        try:
+            print("🔐 Validando token de acesso da API Cardapioweb...")
+            await CardapiowebAuthManager().get_valid_access_token()
+        except Exception as e:
+            logger.warning("worker.initial_auth_warning", error=str(e), msg="Falha no warm-up do token.")
+
         print(f"🔄 Worker iniciado (intervalo: {self.poll_interval}s | batch: {self.batch_size})")
 
         logger.info("worker.started", interval=self.poll_interval, batch_size=self.batch_size)
@@ -89,11 +100,9 @@ class WebhookWorker:
                 success = await self._process_event(session, event)
                 if success:
                     processed_count += 1
-            
-            # --- ADICIONADO: Commit em lote para persistir as alterações na caixa de entrada ---
+
             if events:
                 await session.commit()
-            # ---------------------------------------------------------------------------------
                 
         return processed_count
     
@@ -154,12 +163,9 @@ class WebhookWorker:
                 log.info("event.order_enriched")
             
             elif event_type == "ORDER_STATUS_UPDATED":
-                # --- ADICIONADO: Compatibilidade perfeita com o JSON da Cardapioweb ---
                 new_status = payload_dict.get("order_status") or payload_dict.get("new_status")
-                # ----------------------------------------------------------------------
                 
                 if new_status:
-                    # Atualiza o status do pedido existente
                     is_cancelled = new_status.lower() in ["cancelled", "canceled", "cancelado"]
                     cancel_query_part = ", cancelled_at = NOW()" if is_cancelled else ""
 

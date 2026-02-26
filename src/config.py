@@ -70,16 +70,23 @@ class Settings(BaseSettings):
     cardapioweb_dashboard_base_url: str = Field(
         alias="CARDAPIOWEB_DASHBOARD_BASE_URL"
     )
+    cardapioweb_auth_base_url: str = Field(
+        alias="CARDAPIOWEB_AUTH_BASE_URL"
+    )
     cardapioweb_public_api_key: str = Field(
         alias="CARDAPIOWEB_PUBLIC_API_KEY"
     )
     cardapioweb_dashboard_api_key: str = Field(
         alias="CARDAPIOWEB_DASHBOARD_API_KEY"
     )
+    cardapioweb_refresh_token: str = Field(
+        alias="CARDAPIOWEB_REFRESH_TOKEN"
+    )
     cardapioweb_api_timeout: int = Field(
         default=10,
         alias="CARDAPIOWEB_API_TIMEOUT"
     )
+    
     
     # --------------------------------------------
     # Geo
@@ -103,7 +110,7 @@ class Settings(BaseSettings):
     def validate_app_env(cls, v: str) -> str:
         return v.lower()
     
-    @field_validator("cardapioweb_public_base_url", "cardapioweb_dashboard_base_url")
+    @field_validator("cardapioweb_public_base_url", "cardapioweb_dashboard_base_url", "cardapioweb_auth_base_url")
     @classmethod
     def validate_urls(cls, v: str) -> str:
         """Remove trailing slash se presente."""
