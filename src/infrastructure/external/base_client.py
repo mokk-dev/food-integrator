@@ -66,7 +66,7 @@ class BaseAPIClient:
                 
                 if response.status_code == 401:
                     print(f"❌ API {self.base_url}: Unauthorized")
-                    return None
+                    raise PermissionError("401 Unauthorized")
                 
                 if response.status_code == 404:
                     return None
