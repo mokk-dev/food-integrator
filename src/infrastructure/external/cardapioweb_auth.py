@@ -19,6 +19,7 @@ class CardapiowebAuthManager:
         if cls._instance is None:
             cls._instance = super(CardapiowebAuthManager, cls).__new__(cls)
             cls._instance._auth_lock = asyncio.Lock()
+            # Guarda o último token conhecido em memória para evitar chamadas redundantes ao Redis/API
             cls._instance._memory_access_token = settings.cardapioweb_dashboard_api_key
         return cls._instance
 
@@ -29,9 +30,9 @@ class CardapiowebAuthManager:
     async def get_valid_access_token(self, force_refresh: bool = False) -> str:
         """Retorna um token válido. Se não existir ou for forçado, renova antes."""
         if not force_refresh:
-            access_token = await redis_client.get(self.ACCESS_TOKEN_KEY)
+            access_token = await redis_client.client.get(self.ACCESS_TOKEN_KEY)
             if access_token:
-                self._memory_access_token = access_token.decode("utf-8") if isinstance(access_token, bytes) else access_token
+                self._memory_access_token = access_token
                 return self._memory_access_token
             
             if self._memory_access_token:
@@ -44,19 +45,20 @@ class CardapiowebAuthManager:
         async with self._auth_lock:
             logger.info("auth.refresh_token_started", msg="Iniciando renovação do token de acesso")
             
-            redis_access_token = await redis_client.get(self.ACCESS_TOKEN_KEY)
-            if isinstance(redis_access_token, bytes):
-                redis_access_token = redis_access_token.decode('utf-8')
+            # --- DOUBLE CHECK ---
+            # Verifica se outra thread/worker já atualizou o token enquanto esperávamos pelo Lock
+            redis_access_token = await redis_client.client.get(self.ACCESS_TOKEN_KEY)
                 
             if redis_access_token and redis_access_token != self._memory_access_token:
                 logger.info("auth.token_already_refreshed", msg="Token renovado por outro processo. Atualizando estado local.")
                 self._memory_access_token = redis_access_token
                 return redis_access_token
 
-            refresh_token = await redis_client.get(self.REFRESH_TOKEN_KEY)
-            if refresh_token:
-                refresh_token = refresh_token.decode("utf-8") if isinstance(refresh_token, bytes) else refresh_token
-            else:
+            # --- FLUXO PRINCIPAL DE RENOVAÇÃO ---
+            refresh_token = await redis_client.client.get(self.REFRESH_TOKEN_KEY)
+            
+            # Se não tiver no Redis, usa o da env
+            if not refresh_token:
                 refresh_token = settings.cardapioweb_refresh_token
 
             if not refresh_token:
@@ -91,8 +93,9 @@ class CardapiowebAuthManager:
                 access_exp = max(1, int(data.get("access_token_expires_in", 28800)) - 60)
                 refresh_exp = int(data.get("refresh_token_expires_in", 432000))
 
-                await redis_client.set(self.ACCESS_TOKEN_KEY, new_access, ex=access_exp)
-                await redis_client.set(self.REFRESH_TOKEN_KEY, new_refresh, ex=refresh_exp)
+                # Salva no Redis acessando a propriedade .client
+                await redis_client.client.set(self.ACCESS_TOKEN_KEY, new_access, ex=access_exp)
+                await redis_client.client.set(self.REFRESH_TOKEN_KEY, new_refresh, ex=refresh_exp)
 
                 self._memory_access_token = new_access
 
