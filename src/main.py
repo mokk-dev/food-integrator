@@ -10,9 +10,7 @@ from src.infrastructure.cache.redis_client import redis_client
 from src.infrastructure.db.connection import close_db, init_db
 from src.api.routes import webhooks
 from src.core.logger import logger
-
-# TODO: Import das rotas (serão criadas na Etapa 3)
-# from api.routes import webhooks, health, admin
+from src.infrastructure.external.cardapioweb_auth import CardapiowebAuthManager
 
 
 @asynccontextmanager
@@ -109,8 +107,7 @@ async def health_check():
 async def readiness_check():
     checks = {}
     status_code = 200
-    
-    # Check DB
+
     try:
         from src.infrastructure.db.connection import get_engine
         engine = get_engine()
@@ -122,7 +119,6 @@ async def readiness_check():
         checks["database"] = f"error: {str(e)}"
         status_code = 503
     
-    # Check Redis
     try:
         from src.infrastructure.cache.redis_client import redis_client
         if redis_client._client is None:
@@ -142,9 +138,41 @@ async def readiness_check():
     )
 
 
-# TODO: Registrar rotas na Etapa 3
-# app.include_router(webhooks.router, prefix="/webhook", tags=["Webhooks"])
-# app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+@app.get("/auth/status", tags=["Auth", "Health"])
+async def auth_status_check(force_refresh: bool = False):
+    """
+    Verifica a saúde da autenticação com o Dashboard da Cardapioweb.
+    Se force_refresh=True, ignora o cache e testa ativamente a negociação 
+    de um novo token usando o Refresh Token atual.
+    """
+    try:
+        auth_manager = CardapiowebAuthManager()
+        
+        # Tenta obter o token. Se force_refresh for passado, ele obriga 
+        # o auth_manager a bater na API da Cardapioweb para validar o refresh_token.
+        await auth_manager.get_valid_access_token(force_refresh=force_refresh)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "online",
+                "message": "Tokens válidos e operacionais.",
+                "action_required": None
+            }
+        )
+        
+    except Exception as e:
+        logger.error("auth.healthcheck_failed", error=str(e))
+        
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "offline",
+                "error": "Falha de Autenticação na Plataforma",
+                "detail": str(e),
+                "action_required": "É necessário injetar uma nova sessão humana válida (novo refresh_token)"
+            }
+        )
 
 
 app.include_router(
