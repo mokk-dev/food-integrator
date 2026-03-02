@@ -1,3 +1,8 @@
+# src/tasks/worker.py
+# ============================================
+# WORKER - PROCESSAMENTO BACKGROUND
+# ============================================
+
 import asyncio
 import json
 import signal
@@ -225,6 +230,31 @@ class WebhookWorker:
                     is_cancelled = new_status in ["canceled", "canceling"]
                     cancel_query_part = ", cancelled_at = NOW()" if is_cancelled else ""
 
+                    # -------------------------------------------------------------
+                    # LÓGICA DE TEMPO DE ENTREGA (Webhook payload)
+                    # -------------------------------------------------------------
+                    is_delivered = (new_status == "delivered")
+                    delivered_query_part = ""
+                    event_dt = None
+                    
+                    if is_delivered:
+                        delivered_query_part = ", delivered_at = :event_dt"
+                        # Extrai a data real do evento direto do payload do webhook
+                        raw_event_at = payload_dict.get("created_at") or payload_dict.get("timestamp")
+                        if raw_event_at:
+                            try:
+                                event_dt = datetime.fromisoformat(str(raw_event_at).replace("Z", "+00:00"))
+                            except ValueError:
+                                event_dt = datetime.now()
+                        else:
+                            event_dt = datetime.now()
+
+                    # Prepara os parâmetros para a query principal
+                    query_params = {"status": new_status, "order_id": order_id}
+                    if is_delivered:
+                        query_params["event_dt"] = event_dt
+
+                    # Atualiza o estado atual na tabela 'orders' (e a data de entrega se for o caso)
                     await session.execute(
                         text(f"""
                             UPDATE orders 
@@ -232,11 +262,13 @@ class WebhookWorker:
                                 updated_at = NOW(),
                                 status_changed_at = NOW()
                                 {cancel_query_part}
+                                {delivered_query_part}
                             WHERE id = :order_id
                         """),
-                        {"status": new_status, "order_id": order_id}
+                        query_params
                     )
                     
+                    # 2. EVENT SOURCING
                     await self._register_order_event(
                         session=session,
                         event_id=event_id,
@@ -247,7 +279,10 @@ class WebhookWorker:
                         inbox_received_at=received_at
                     )
                     
-                    # GATILHO ESTRITO PARA BUSCAR MOTOBOY
+                    # -------------------------------------------------------------
+                    # 3. GATILHO ESTRITO PARA BUSCAR MOTOBOY (API Dashboard)
+                    # Agora roda APENAS quando for 'released'. 'delivered' já foi tratado acima.
+                    # -------------------------------------------------------------
                     if new_status == "released":
                         result = await session.execute(
                             text("SELECT order_type FROM orders WHERE id = :order_id"),
@@ -275,6 +310,8 @@ class WebhookWorker:
 
                     if is_cancelled:
                         log.info("event.order_cancelled", new_status=new_status)
+                    elif is_delivered:
+                        log.info("event.order_delivered", new_status=new_status, delivered_at=str(event_dt))
                     else:
                         log.info("event.status_updated", new_status=new_status)
                 else:
