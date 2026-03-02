@@ -1,8 +1,3 @@
-# src/core/services/order_enrichment.py
-# ============================================
-# ORDER ENRICHMENT SERVICE
-# ============================================
-
 import json
 import zoneinfo
 from datetime import datetime, timedelta
@@ -28,34 +23,36 @@ class OrderEnrichmentService:
         self,
         session: AsyncSession,
         order_id: int,
-        # event_type: str,
-        # order_status: str,
-        # raw_payload: Dict[str, Any],
         merchant_id: str
     ) -> Tuple[bool, Optional[str]]:
         """
         Enriquece pedido chamando APIs do Cardapioweb utilizando Unit of Work.
         """
         try:
+            # 1. API PARTNER (Fase 1)
             async with CardapiowebPublicAPI() as api_public:
                 partner_data = await api_public.get_order(order_id)
             
             if not partner_data or partner_data.get("_api_error"):
                 return False, f"API Partner falhou para order {order_id}"
             
+            # 2. Extrair dados normalizados usando novo payload estruturado
             order_data = self._extract_from_partner(partner_data)
-
+            
+            # 3. Calcular distância 
             distance_km, distance_zone = await self._calculate_distance(
                 session,
                 order_data.get("delivery_address", {}),
                 merchant_id
             )
             
+            # 4. Obter/criacao automatica e inteligente de operation_day
             operation_day_id = await self._get_or_create_operation_day(session, merchant_id)
                 
             if not operation_day_id:
                 return False, f"Não foi possível obter ou criar operation_day para o merchant {merchant_id}"
-
+            
+            # 5. Inserir em 'orders' na sessão ativa
             await self._insert_order(
                 session=session,
                 order_id=order_id,
@@ -66,7 +63,8 @@ class OrderEnrichmentService:
                 distance_zone=distance_zone,
                 api_response=partner_data
             )
-
+                
+            # 6. API PLATAFORMA (Fase 2) - Enriquecimento de entrega (fallback/segurança extra)
             if self._should_call_dashboard(order_data):
                 async with CardapiowebDashboardAPI() as api_dash:
                     dashboard_data = await api_dash.get_order_details(order_id)
@@ -78,9 +76,11 @@ class OrderEnrichmentService:
                             dashboard_data
                         )
             
+            # Atenção: Sem session.commit() aqui. O commit é feito pelo Worker.
             return True, None
             
         except Exception as e:
+            # Propaga o erro para garantir o rollback no context manager
             return False, str(e)
             
     async def _get_or_create_operation_day(self, session: AsyncSession, merchant_id: str) -> Optional[int]:
@@ -88,6 +88,7 @@ class OrderEnrichmentService:
         Gera a data lógica do expediente baseada no start_time e end_time da loja.
         Se passar da meia-noite mas for antes do fechamento, a venda cai no caixa do dia anterior.
         """
+        # 1. Configs da loja
         result = await session.execute(
             text("SELECT default_start_time, default_end_time, default_delivery_capacity FROM merchants WHERE merchant_id = :id"),
             {"id": str(merchant_id)}
@@ -98,16 +99,21 @@ class OrderEnrichmentService:
             
         start_time, end_time, capacity = merchant
         
+        # 2. Calcular Data Lógica
         tz = zoneinfo.ZoneInfo('America/Sao_Paulo')
         local_now = datetime.now(tz)
         logical_date = local_now.date()
         
+        # Avalia se a jornada cruza a meia-noite
         turno_cruza_meia_noite = start_time > end_time
         
         if turno_cruza_meia_noite:
+            # Se a hora atual for menor ou igual ao fechamento (ex: 01:00 <= 02:00), 
+            # significa que a madrugada pertence ao expediente do dia anterior.
             if local_now.time() <= end_time:
                 logical_date = logical_date - timedelta(days=1)
                 
+        # 3. Auto-Fechar expedientes antigos deixados abertos
         await session.execute(
             text("""
                 UPDATE operation_days 
@@ -118,7 +124,8 @@ class OrderEnrichmentService:
             """),
             {"id": str(merchant_id), "logical_date": logical_date}
         )
-
+        
+        # 4. Tentar obter o expediente do dia lógico atual
         result = await session.execute(
             text("SELECT id FROM operation_days WHERE merchant_id = :id AND operation_day = :logical_date LIMIT 1"),
             {"id": str(merchant_id), "logical_date": logical_date}
@@ -126,7 +133,8 @@ class OrderEnrichmentService:
         row = result.fetchone()
         if row:
             return row[0]
-
+            
+        # 5. Criar caso não exista
         query = text("""
             INSERT INTO operation_days (
                 merchant_id, operation_day, start_time, end_time, 
@@ -153,7 +161,8 @@ class OrderEnrichmentService:
 
         raw_uid = data.get("id")
         raw_display = data.get("display_id")
-
+        
+        # Fallback de segurança para display_id
         if raw_display is None and raw_uid:
             raw_display = int(str(raw_uid)[-4:])
             
@@ -260,7 +269,8 @@ class OrderEnrichmentService:
             return False
         
         status = order_data.get("status", "")
-        return status in ["released", "dispatched", "in_transit", "delivered", "ready", "confirmed", "closed"]
+        # Chama a API de Dashboard EXCLUSIVAMENTE quando o pedido sai para entrega
+        return status == "released"
     
     async def _insert_order(
         self,

@@ -1,8 +1,3 @@
-# src/tasks/worker.py
-# ============================================
-# WORKER - PROCESSAMENTO BACKGROUND
-# ============================================
-
 import asyncio
 import json
 import signal
@@ -136,30 +131,26 @@ class WebhookWorker:
         inbox_received_at: datetime
     ):
         """Helper para registrar a linha do tempo (Event Sourcing) na tabela order_events."""
-        # 1. Descobrir o operation_day_id associado a este pedido
         result = await session.execute(
             text("SELECT operation_day_id FROM orders WHERE id = :order_id"),
             {"order_id": order_id}
         )
         row = result.fetchone()
         if not row:
-            logger.warning("worker.order_missing_for_event", order_id=order_id, event_id=event_id, msg="Pedido não encontrado para atrelar o evento histórico.")
+            logger.warning("worker.order_missing_for_event", order_id=order_id, event_id=event_id, msg="Pedido não encontrado para atrelar evento.")
             return
             
         operation_day_id = row[0]
         
-        # 2. Obter data do evento (com fallback de segurança)
         raw_event_at = payload_dict.get("created_at") or payload_dict.get("timestamp")
         if raw_event_at:
             try:
-                # Trata formatação ISO com Timezone (se houver Z, troca para o offset do Python)
                 event_at = datetime.fromisoformat(str(raw_event_at).replace("Z", "+00:00"))
             except ValueError:
                 event_at = datetime.now()
         else:
             event_at = datetime.now()
             
-        # 3. Inserir na tabela (usando o ON CONFLICT para garantir idempotência do evento exato)
         query = text("""
             INSERT INTO order_events (
                 event_id, order_id, operation_day_id, event_type, status,
@@ -203,7 +194,6 @@ class WebhookWorker:
             if event_type == "ORDER_CREATED":
                 enrichment = OrderEnrichmentService()
                 
-                # UNIT OF WORK: Passamos apenas a session, ID do pedido e merchant
                 success, error = await enrichment.enrich_order(
                     session=session,
                     order_id=order_id,
@@ -230,7 +220,9 @@ class WebhookWorker:
                 new_status = payload_dict.get("order_status") or payload_dict.get("new_status")
                 
                 if new_status:
-                    is_cancelled = new_status.lower() in ["cancelled", "canceled", "cancelado"]
+                    new_status = new_status.lower().strip()
+                    
+                    is_cancelled = new_status in ["canceled", "canceling"]
                     cancel_query_part = ", cancelled_at = NOW()" if is_cancelled else ""
 
                     await session.execute(
@@ -255,6 +247,32 @@ class WebhookWorker:
                         inbox_received_at=received_at
                     )
                     
+                    # GATILHO ESTRITO PARA BUSCAR MOTOBOY
+                    if new_status == "released":
+                        result = await session.execute(
+                            text("SELECT order_type FROM orders WHERE id = :order_id"),
+                            {"order_id": order_id}
+                        )
+                        row = result.fetchone()
+                        
+                        if row and row[0] == "delivery":
+                            try:
+                                log.info("event.fetching_delivery_man", msg="Pedido liberado. Buscando dados do motoboy na API de Dashboard...")
+                                enrichment = OrderEnrichmentService()
+                                
+                                async with CardapiowebDashboardAPI() as api_dash:
+                                    dashboard_data = await api_dash.get_order_details(order_id)
+                                    
+                                    if dashboard_data and not dashboard_data.get("_api_error"):
+                                        await enrichment._update_with_dashboard_data(
+                                            session=session,
+                                            order_id=order_id,
+                                            dashboard_data=dashboard_data
+                                        )
+                                        log.info("event.delivery_man_updated", msg="Motoboy registrado com sucesso.")
+                            except Exception as dash_err:
+                                log.warning("event.delivery_man_fetch_failed", error=str(dash_err))
+
                     if is_cancelled:
                         log.info("event.order_cancelled", new_status=new_status)
                     else:
@@ -269,7 +287,6 @@ class WebhookWorker:
             return True
             
         except Exception as e:
-            # Qualquer erro no processamento gera o rollback via o context manager superior
             log.error("event.processing_failed", error=str(e), exc_info=True)
             await self._mark_failed(session, event_id, str(e))
             return False
