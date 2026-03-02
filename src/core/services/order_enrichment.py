@@ -195,23 +195,41 @@ class OrderEnrichmentService:
         }
     
     def _extract_from_dashboard(self, data: Dict) -> Dict:
-        """Extrai dados de entrega da API Plataforma (com fallbacks flexíveis)."""
-        # Desencapsula o JSON caso venha dentro de um nó "data" ou "order"
+        """Extrai dados de entrega do Payload Real da API Dashboard."""
+        # Desencapsula caso venha dentro de algum nó extra no futuro, mas o padrão é a raiz
         core_data = data.get("data") or data.get("order") or data
         
-        delivery = core_data.get("delivery") or {}
+        # Extração Direta do Motoboy
+        delivery_man = core_data.get("delivery_man") or {}
+        driver_name = delivery_man.get("name")
+        driver_phone = delivery_man.get("phone_number") or delivery_man.get("phone")
         
-        # Tenta achar o motorista dentro do nó 'delivery' ou solto na raiz
-        driver = delivery.get("driver") or delivery.get("deliveryMan")
-        if not driver:
-            driver = core_data.get("driver") or core_data.get("deliveryMan") or {}
+        # Extração da Rota
+        delivery_route = core_data.get("delivery_route") or {}
+        route_name = delivery_route.get("name")
+        
+        # Extração dos Tempos Exatos via Histórico de Mudanças
+        dispatched_at = None
+        delivered_at = None
+        
+        status_changes = core_data.get("status_changes", [])
+        for change in status_changes:
+            status = change.get("status")
+            if status == "released":
+                dispatched_at = change.get("created_at")
+            elif status == "delivered":
+                delivered_at = change.get("created_at")
+                
+        # Fallback de tempo caso o status_changes não venha
+        if not dispatched_at and core_data.get("status") == "released":
+            dispatched_at = core_data.get("updated_at")
             
         return {
-            "delivery_man_name": driver.get("name") or driver.get("firstName") or driver.get("full_name"),
-            "delivery_man_phone": driver.get("phone") or driver.get("cellphone"),
-            "delivery_route": delivery.get("route") or delivery.get("routeName"),
-            "dispatched_at": delivery.get("dispatchedAt") or core_data.get("dispatchedAt"),
-            "delivered_at": delivery.get("deliveredAt") or core_data.get("deliveredAt"),
+            "delivery_man_name": driver_name,
+            "delivery_man_phone": driver_phone,
+            "delivery_route": route_name,
+            "dispatched_at": dispatched_at,
+            "delivered_at": delivered_at,
         }
     
     def _normalize_status(self, status: Optional[str]) -> str:
