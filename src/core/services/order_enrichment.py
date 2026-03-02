@@ -195,16 +195,23 @@ class OrderEnrichmentService:
         }
     
     def _extract_from_dashboard(self, data: Dict) -> Dict:
-        """Extrai dados de entrega da API Plataforma."""
-        delivery = data.get("delivery") or {}
-        driver = delivery.get("driver") or delivery.get("deliveryMan") or {}
+        """Extrai dados de entrega da API Plataforma (com fallbacks flexíveis)."""
+        # Desencapsula o JSON caso venha dentro de um nó "data" ou "order"
+        core_data = data.get("data") or data.get("order") or data
         
+        delivery = core_data.get("delivery") or {}
+        
+        # Tenta achar o motorista dentro do nó 'delivery' ou solto na raiz
+        driver = delivery.get("driver") or delivery.get("deliveryMan")
+        if not driver:
+            driver = core_data.get("driver") or core_data.get("deliveryMan") or {}
+            
         return {
-            "delivery_man_name": driver.get("name"),
+            "delivery_man_name": driver.get("name") or driver.get("firstName") or driver.get("full_name"),
             "delivery_man_phone": driver.get("phone") or driver.get("cellphone"),
             "delivery_route": delivery.get("route") or delivery.get("routeName"),
-            "dispatched_at": delivery.get("dispatchedAt"),
-            "delivered_at": delivery.get("deliveredAt"),
+            "dispatched_at": delivery.get("dispatchedAt") or core_data.get("dispatchedAt"),
+            "delivered_at": delivery.get("deliveredAt") or core_data.get("deliveredAt"),
         }
     
     def _normalize_status(self, status: Optional[str]) -> str:
@@ -351,14 +358,14 @@ class OrderEnrichmentService:
         """Atualiza pedido com dados da API Plataforma usando a sessão herdada."""
         delivery_info = self._extract_from_dashboard(dashboard_data)
         
-        if not any(delivery_info.values()):
-            return
+        # REMOVIDO: O "if not any()" que bloqueava a execução.
+        # Agora, independente de achar o motoboy ou não, NÓS VAMOS GRAVAR O PAYLOAD!
         
         query = text("""
             UPDATE orders
-            SET delivery_man_name = :delivery_man_name,
-                delivery_man_phone = :delivery_man_phone,
-                delivery_route = :delivery_route,
+            SET delivery_man_name = COALESCE(:delivery_man_name, delivery_man_name),
+                delivery_man_phone = COALESCE(:delivery_man_phone, delivery_man_phone),
+                delivery_route = COALESCE(:delivery_route, delivery_route),
                 dispatched_at = COALESCE(:dispatched_at, dispatched_at),
                 delivered_at = COALESCE(:delivered_at, delivered_at),
                 api_dashboard_response = :api_response,
