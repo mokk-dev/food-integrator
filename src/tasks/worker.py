@@ -1,3 +1,4 @@
+# src/tasks/worker.py
 # ============================================
 # WORKER - PROCESSAMENTO BACKGROUND
 # ============================================
@@ -13,16 +14,14 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-
 from src.core.logger import logger
 from src.config import settings
 from src.core.services.order_enrichment import OrderEnrichmentService
 from src.infrastructure.cache.redis_client import redis_client
 from src.infrastructure.db.connection import get_db_session
-
 from src.infrastructure.external.cardapioweb_dashboard import CardapiowebDashboardAPI
-
 from src.infrastructure.external.cardapioweb_auth import CardapiowebAuthManager
+from src.tasks.scheduler import start_scheduler
 
 
 class WebhookWorker:
@@ -126,8 +125,63 @@ class WebhookWorker:
         
         return result.fetchall()
     
+    async def _register_order_event(
+        self,
+        session: AsyncSession,
+        event_id: str,
+        order_id: int,
+        event_type: str,
+        status: str,
+        payload_dict: dict,
+        inbox_received_at: datetime
+    ):
+        """Helper para registrar a linha do tempo (Event Sourcing) na tabela order_events."""
+        # 1. Descobrir o operation_day_id associado a este pedido
+        result = await session.execute(
+            text("SELECT operation_day_id FROM orders WHERE id = :order_id"),
+            {"order_id": order_id}
+        )
+        row = result.fetchone()
+        if not row:
+            logger.warning("worker.order_missing_for_event", order_id=order_id, event_id=event_id, msg="Pedido não encontrado para atrelar o evento histórico.")
+            return
+            
+        operation_day_id = row[0]
+        
+        # 2. Obter data do evento (com fallback de segurança)
+        raw_event_at = payload_dict.get("created_at") or payload_dict.get("timestamp")
+        if raw_event_at:
+            try:
+                # Trata formatação ISO com Timezone (se houver Z, troca para o offset do Python)
+                event_at = datetime.fromisoformat(str(raw_event_at).replace("Z", "+00:00"))
+            except ValueError:
+                event_at = datetime.now()
+        else:
+            event_at = datetime.now()
+            
+        # 3. Inserir na tabela (usando o ON CONFLICT para garantir idempotência do evento exato)
+        query = text("""
+            INSERT INTO order_events (
+                event_id, order_id, operation_day_id, event_type, status,
+                event_at, received_at, inbox_received_at
+            ) VALUES (
+                :event_id, :order_id, :operation_day_id, :event_type, :status,
+                :event_at, NOW(), :inbox_received_at
+            ) ON CONFLICT (event_id, event_at) DO NOTHING
+        """)
+        
+        await session.execute(query, {
+            "event_id": str(event_id),
+            "order_id": int(order_id),
+            "operation_day_id": int(operation_day_id),
+            "event_type": str(event_type),
+            "status": str(status) if status else "unknown",
+            "event_at": event_at,
+            "inbox_received_at": inbox_received_at
+        })
+    
     async def _process_event(self, session: AsyncSession, event: tuple) -> bool:
-        """Processa evento individual."""
+        """Processa evento individual injetando a sessão (Unit of Work)."""
         (
             event_id, order_id, event_type, order_status,
             payload, received_at, attempts
@@ -148,17 +202,27 @@ class WebhookWorker:
             
             if event_type == "ORDER_CREATED":
                 enrichment = OrderEnrichmentService()
+                
+                # UNIT OF WORK: Passamos apenas a session, ID do pedido e merchant
                 success, error = await enrichment.enrich_order(
+                    session=session,
                     order_id=order_id,
-                    event_type=event_type,
-                    order_status=order_status or "pending",
-                    raw_payload=payload_dict,
                     merchant_id=merchant_id
                 )
                 
                 if not success:
                     log.error("event.enrichment_failed", error=error)
                     raise Exception(f"Enrichment failed: {error}")
+                
+                await self._register_order_event(
+                    session=session,
+                    event_id=event_id,
+                    order_id=order_id,
+                    event_type=event_type,
+                    status=order_status or "pending",
+                    payload_dict=payload_dict,
+                    inbox_received_at=received_at
+                )
                 
                 log.info("event.order_enriched")
             
@@ -180,6 +244,17 @@ class WebhookWorker:
                         """),
                         {"status": new_status, "order_id": order_id}
                     )
+                    
+                    await self._register_order_event(
+                        session=session,
+                        event_id=event_id,
+                        order_id=order_id,
+                        event_type=event_type,
+                        status=new_status,
+                        payload_dict=payload_dict,
+                        inbox_received_at=received_at
+                    )
+                    
                     if is_cancelled:
                         log.info("event.order_cancelled", new_status=new_status)
                     else:
@@ -194,6 +269,7 @@ class WebhookWorker:
             return True
             
         except Exception as e:
+            # Qualquer erro no processamento gera o rollback via o context manager superior
             log.error("event.processing_failed", error=str(e), exc_info=True)
             await self._mark_failed(session, event_id, str(e))
             return False
@@ -211,12 +287,7 @@ class WebhookWorker:
             {"event_id": event_id}
         )
     
-    async def _mark_failed(
-        self,
-        session: AsyncSession,
-        event_id: str,
-        error: str
-    ):
+    async def _mark_failed(self, session: AsyncSession, event_id: str, error: str):
         """Marca evento como falho."""
         await session.execute(
             text("""
@@ -227,15 +298,18 @@ class WebhookWorker:
                     processed_at = NOW()
                 WHERE event_id = :event_id
             """),
-            {"event_id": event_id, "error": error[:500]}  # Limitar tamanho
+            {"event_id": event_id, "error": error[:500]}
         )
 
 
 async def main():
     """Entry point."""
+    scheduler = start_scheduler()
+    
     worker = WebhookWorker()
     await worker.start()
-
+    
+    scheduler.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())
