@@ -198,7 +198,7 @@ class OrderEnrichmentService:
         """Extrai dados de entrega do Payload Real da API Dashboard."""
         core_data = data.get("data") or data.get("order") or data
         
-        # Extração Direta do Motoboy (agora com ID)
+        # Extração Direta do Motoboy
         delivery_man = core_data.get("delivery_man") or {}
         driver_id = delivery_man.get("id")
         driver_name = delivery_man.get("name")
@@ -209,28 +209,38 @@ class OrderEnrichmentService:
         route_name = delivery_route.get("name")
         
         # Extração dos Tempos Exatos via Histórico de Mudanças
-        dispatched_at = None
-        delivered_at = None
+        dispatched_at_str = None
+        delivered_at_str = None
         
         status_changes = core_data.get("status_changes", [])
         for change in status_changes:
             status = change.get("status")
             if status == "released":
-                dispatched_at = change.get("created_at")
+                dispatched_at_str = change.get("created_at")
             elif status == "delivered":
-                delivered_at = change.get("created_at")
+                delivered_at_str = change.get("created_at")
                 
         # Fallback de tempo
-        if not dispatched_at and core_data.get("status") == "released":
-            dispatched_at = core_data.get("updated_at")
+        if not dispatched_at_str and core_data.get("status") == "released":
+            dispatched_at_str = core_data.get("updated_at")
             
+        # Helper para converter string em objeto datetime
+        def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
+            if not date_str:
+                return None
+            try:
+                # O python lida nativamente com '2026-03-02T20:04:36.130-03:00'
+                return datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+            except ValueError:
+                return None
+
         return {
             "delivery_man_id": driver_id,
             "delivery_man_name": driver_name,
             "delivery_man_phone": driver_phone,
             "delivery_route": route_name,
-            "dispatched_at": dispatched_at,
-            "delivered_at": delivered_at,
+            "dispatched_at": _parse_date(dispatched_at_str),
+            "delivered_at": _parse_date(delivered_at_str),
         }
     
     def _normalize_status(self, status: Optional[str]) -> str:
