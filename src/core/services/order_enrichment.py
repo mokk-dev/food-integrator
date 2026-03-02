@@ -196,11 +196,11 @@ class OrderEnrichmentService:
     
     def _extract_from_dashboard(self, data: Dict) -> Dict:
         """Extrai dados de entrega do Payload Real da API Dashboard."""
-        # Desencapsula caso venha dentro de algum nó extra no futuro, mas o padrão é a raiz
         core_data = data.get("data") or data.get("order") or data
         
-        # Extração Direta do Motoboy
+        # Extração Direta do Motoboy (agora com ID)
         delivery_man = core_data.get("delivery_man") or {}
+        driver_id = delivery_man.get("id")
         driver_name = delivery_man.get("name")
         driver_phone = delivery_man.get("phone_number") or delivery_man.get("phone")
         
@@ -220,11 +220,12 @@ class OrderEnrichmentService:
             elif status == "delivered":
                 delivered_at = change.get("created_at")
                 
-        # Fallback de tempo caso o status_changes não venha
+        # Fallback de tempo
         if not dispatched_at and core_data.get("status") == "released":
             dispatched_at = core_data.get("updated_at")
             
         return {
+            "delivery_man_id": driver_id,
             "delivery_man_name": driver_name,
             "delivery_man_phone": driver_phone,
             "delivery_route": route_name,
@@ -376,12 +377,10 @@ class OrderEnrichmentService:
         """Atualiza pedido com dados da API Plataforma usando a sessão herdada."""
         delivery_info = self._extract_from_dashboard(dashboard_data)
         
-        # REMOVIDO: O "if not any()" que bloqueava a execução.
-        # Agora, independente de achar o motoboy ou não, NÓS VAMOS GRAVAR O PAYLOAD!
-        
         query = text("""
             UPDATE orders
-            SET delivery_man_name = COALESCE(:delivery_man_name, delivery_man_name),
+            SET delivery_man_id = COALESCE(:delivery_man_id, delivery_man_id),
+                delivery_man_name = COALESCE(:delivery_man_name, delivery_man_name),
                 delivery_man_phone = COALESCE(:delivery_man_phone, delivery_man_phone),
                 delivery_route = COALESCE(:delivery_route, delivery_route),
                 dispatched_at = COALESCE(:dispatched_at, dispatched_at),
@@ -395,6 +394,7 @@ class OrderEnrichmentService:
             query,
             {
                 "order_id": int(order_id),
+                "delivery_man_id": delivery_info.get("delivery_man_id"),
                 "delivery_man_name": delivery_info.get("delivery_man_name"),
                 "delivery_man_phone": delivery_info.get("delivery_man_phone"),
                 "delivery_route": delivery_info.get("delivery_route"),

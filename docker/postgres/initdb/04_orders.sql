@@ -44,6 +44,7 @@ CREATE TABLE orders (
     delivery_fee DECIMAL(10, 2),
     
     -- Entrega (enriquecido via API dashboard - Fase 2)
+    delivery_man_id INTEGER,
     delivery_man_name VARCHAR(100),
     delivery_man_phone VARCHAR(20),
     delivery_route VARCHAR(50),
