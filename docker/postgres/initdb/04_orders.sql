@@ -126,5 +126,5 @@ COMMENT ON COLUMN orders.distance_km IS 'Distância calculada em Python via GeoS
 COMMENT ON COLUMN orders.distance_zone IS 'Classificação calculada em Python: near/medium/far baseado nos thresholds do merchant.';
 COMMENT ON COLUMN orders.source_event_id IS 'Referência lógica ao webhook_inbox. Sem FK física para permitir retention policy.';
 COMMENT ON COLUMN orders.api_dashboard_response IS 'Cache raw da API dashboard Cardapioweb (Fase 2).';
-COMMENT ON COLUMN orders.inserted_at IS 'Timestamp de inserção no banco de dados (metadado interno).';
+COMMENT ON COLUMN orders.created_at IS 'Timestamp de inserção no banco de dados (metadado interno).';
 COMMENT ON COLUMN orders.updated_at IS 'Timestamp de última atualização no banco (atualizado via trigger).';
