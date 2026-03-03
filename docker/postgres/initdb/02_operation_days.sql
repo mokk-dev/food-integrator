@@ -3,8 +3,9 @@
 -- ============================================
 
 CREATE TABLE operation_days (
-    id SERIAL,
+    id SERIAL PRIMARY KEY,
     merchant_id VARCHAR(50) NOT NULL REFERENCES merchants(merchant_id),
+    operation_cw_id VARCHAR(50),
     
     operation_day DATE NOT NULL,
     
@@ -18,16 +19,13 @@ CREATE TABLE operation_days (
     
     was_edited BOOLEAN DEFAULT FALSE,
     
-    -- Métricas consolidadas (atualizadas ao fechar)
     total_orders INT,
     canceled_orders INT DEFAULT 0,
     total_revenue DECIMAL(12, 2),
     avg_preparation_minutes INT,
     avg_delivery_minutes INT,
     
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    
-    PRIMARY KEY (id, operation_day)
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Índices
