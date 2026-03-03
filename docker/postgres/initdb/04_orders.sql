@@ -57,7 +57,10 @@ CREATE TABLE IF NOT EXISTS orders (
     delivery_route VARCHAR(255),
     
     -- Payloads (Debug)
-    api_dashboard_response JSONB
+    api_dashboard_response JSONB,
+
+    used_for_training BOOLEAN DEFAULT FALSE,
+    ml_features_version VARCHAR(50)
 );
 
 -- Trigger para updated_at
