@@ -114,8 +114,12 @@ class OrderEnrichmentService:
 
         raw_uid = data.get("id")
         raw_display = data.get("display_id")
+        
+        # CORREÇÃO AQUI: Em vez de converter para int(), tratamos como string pura
         if raw_display is None and raw_uid:
-            raw_display = int(str(raw_uid)[-4:])
+            raw_display = str(raw_uid)[-4:]
+        elif raw_display is not None:
+            raw_display = str(raw_display)
 
         created_dt = None
         raw_created = data.get("created_at")
@@ -125,7 +129,7 @@ class OrderEnrichmentService:
         
         return {
             "uid": str(raw_uid) if raw_uid else None,
-            "display_id": raw_display,
+            "display_id": raw_display, # Agora vai enviar sempre como Texto (str)
             "order_type": data.get("order_type", "delivery"),
             "sales_channel": data.get("sales_channel") or "app_proprio",
             "status": self._normalize_status(data.get("status")),
