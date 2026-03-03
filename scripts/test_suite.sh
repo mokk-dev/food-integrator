@@ -163,9 +163,6 @@ test_db() {
     run_test "2.2.4 - Tabela orders existe" \
         "psql_cmd 'SELECT 1 FROM orders LIMIT 1;' > /dev/null"
     
-    run_test "2.2.5 - Tabela order_events existe" \
-        "psql_cmd 'SELECT 1 FROM order_events LIMIT 1;' > /dev/null"
-    
     run_test "2.2.6 - Tabela operation_snapshots existe" \
         "psql_cmd 'SELECT 1 FROM operation_snapshots LIMIT 1;' > /dev/null"
     
@@ -232,7 +229,6 @@ test_crud() {
     # Limpar dados de teste anteriores (ignorar erros)
     psql_cmd "DELETE FROM webhook_inbox WHERE event_id LIKE 'test_suite_%';" > /dev/null 2>&1 || true
     psql_cmd "DELETE FROM orders WHERE id >= 90000;" > /dev/null 2>&1 || true
-    psql_cmd "DELETE FROM order_events WHERE event_id LIKE 'test_suite_%';" > /dev/null 2>&1 || true
     psql_cmd "DELETE FROM operation_days WHERE operation_day > '2090-01-01';" > /dev/null 2>&1 || true
     
     local TEST_EVENT_ID="test_suite_$(date +%s)_$$"

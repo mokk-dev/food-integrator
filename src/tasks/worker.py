@@ -124,58 +124,7 @@ class WebhookWorker:
         )
         
         return result.fetchall()
-    
-    async def _register_order_event(
-        self,
-        session: AsyncSession,
-        event_id: str,
-        order_id: int,
-        event_type: str,
-        status: str,
-        payload_dict: dict,
-        inbox_received_at: datetime
-    ):
-        """Helper para registrar a linha do tempo (Event Sourcing) na tabela order_events."""
-        result = await session.execute(
-            text("SELECT operation_day_id FROM orders WHERE id = :order_id"),
-            {"order_id": order_id}
-        )
-        row = result.fetchone()
-        if not row:
-            logger.warning("worker.order_missing_for_event", order_id=order_id, event_id=event_id, msg="Pedido não encontrado para atrelar evento.")
-            return
-            
-        operation_day_id = row[0]
-        
-        raw_event_at = payload_dict.get("created_at") or payload_dict.get("timestamp")
-        if raw_event_at:
-            try:
-                event_at = datetime.fromisoformat(str(raw_event_at).replace("Z", "+00:00"))
-            except ValueError:
-                event_at = datetime.now()
-        else:
-            event_at = datetime.now()
-            
-        query = text("""
-            INSERT INTO order_events (
-                event_id, order_id, operation_day_id, event_type, status,
-                event_at, received_at, inbox_received_at
-            ) VALUES (
-                :event_id, :order_id, :operation_day_id, :event_type, :status,
-                :event_at, NOW(), :inbox_received_at
-            ) ON CONFLICT (event_id, event_at) DO NOTHING
-        """)
-        
-        await session.execute(query, {
-            "event_id": str(event_id),
-            "order_id": int(order_id),
-            "operation_day_id": int(operation_day_id),
-            "event_type": str(event_type),
-            "status": str(status) if status else "unknown",
-            "event_at": event_at,
-            "inbox_received_at": inbox_received_at
-        })
-    
+      
     async def _process_event(self, session: AsyncSession, event: tuple) -> bool:
         """Processa evento individual injetando a sessão (Unit of Work)."""
         (event_id, order_id, event_type, order_status, payload, received_at, attempts) = event
