@@ -6,70 +6,58 @@
 -- Motivo: Testabilidade, evitar carga no PostgreSQL, permitir lógica 
 -- complexa de fallback quando coordenadas são inválidas.
 
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
     id BIGINT PRIMARY KEY,
-    uid VARCHAR(20) UNIQUE,
-    display_id INT,
+    uid VARCHAR(100),
+    display_id VARCHAR(50),
+    merchant_id VARCHAR(100) NOT NULL REFERENCES merchants(merchant_id),
+    operation_day_id INTEGER REFERENCES operation_days(id),
+    source_event_id VARCHAR(100),
     
-    merchant_id VARCHAR(50) NOT NULL REFERENCES merchants(merchant_id),
-    operation_day_id INT NOT NULL,
-    
-    -- Origem do processamento
-    -- DECISÃO ADR-003: Sem FK física para webhook_inbox(event_id)
-    -- Permite retention policy (limpeza) do inbox sem orphan records
-    -- A rastreabilidade é mantida pelo valor lógico, não constraint física
-    source_event_id VARCHAR(30) NOT NULL,
-    
-    -- Timeline do pedido (vinda do webhook Cardapioweb)
+    -- Tempos (Event Sourcing interno)
     created_at TIMESTAMPTZ NOT NULL,
-    dispatched_at TIMESTAMPTZ,
-    delivered_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    status_changed_at TIMESTAMPTZ,
+    confirmed_at TIMESTAMPTZ,
+    ready_at TIMESTAMPTZ,
+    released_at TIMESTAMPTZ,
+    waiting_to_catch_at TIMESTAMPTZ,
+    canceling_at TIMESTAMPTZ,
     cancelled_at TIMESTAMPTZ,
+    closed_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
     
-    -- Tipo e canal
-    order_type VARCHAR(20) NOT NULL CHECK (order_type IN ('delivery', 'takeout', 'onsite', 'closed_table')),
+    -- Dados do Pedido
+    order_type VARCHAR(50) NOT NULL,
     sales_channel VARCHAR(50),
+    status VARCHAR(50) NOT NULL,
+    cancellation_reason TEXT,
     
-    -- Cliente
+    -- Dados do Cliente (BI de Retenção)
+    customer_id BIGINT,
     customer_name VARCHAR(255),
     customer_phone VARCHAR(50),
+    customer_orders_count INTEGER,
+    
+    -- Dados Geográficos (BI de Rotas)
     delivery_address JSONB,
+    delivery_neighborhood VARCHAR(255),
+    delivery_city VARCHAR(255),
+    distance_km NUMERIC(10, 2),
+    distance_zone VARCHAR(50),
     
-    -- Conteúdo
-    items JSONB,
-    payments JSONB,
+    -- Valores
+    total_value NUMERIC(10, 2) NOT NULL,
+    delivery_fee NUMERIC(10, 2),
     
-    -- Financeiro
-    total_value DECIMAL(10, 2),
-    delivery_fee DECIMAL(10, 2),
-    
-    -- Entrega (enriquecido via API dashboard - Fase 2)
+    -- Dados Logísticos
     delivery_man_id INTEGER,
-    delivery_man_name VARCHAR(100),
-    delivery_man_phone VARCHAR(20),
-    delivery_route VARCHAR(50),
+    delivery_man_name VARCHAR(255),
+    delivery_man_phone VARCHAR(50),
+    delivery_route VARCHAR(255),
     
-    -- Status atual (denormalizado para performance)
-    status VARCHAR(30),
-    status_changed_at TIMESTAMPTZ,
-    
-    -- Features geoespaciais (POPULADAS VIA PYTHON - GeoService)
-    -- distance_km: Calculado por Haversine em Python durante enriquecimento
-    -- distance_zone: Classificado em Python baseado nos thresholds do merchant
-    distance_km DECIMAL(6, 2),
-    distance_zone VARCHAR(10) CHECK (distance_zone IN ('near', 'medium', 'far', NULL)),
-    
-    -- Cache das APIs para debug e reprocessamento
-    api_public_response JSONB,
-    api_dashboard_response JSONB,
-    
-    -- ML
-    used_for_training BOOLEAN DEFAULT FALSE,
-    ml_features_version INT DEFAULT 1,
-    
-    -- Metadados do sistema (quando inserimos/atualizamos no DB)
-    inserted_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    -- Payloads (Debug)
+    api_dashboard_response JSONB
 );
 
 -- Trigger para updated_at
