@@ -6,9 +6,6 @@
 CREATE INDEX idx_orders_address_gin 
 ON orders USING GIN (delivery_address);
 
-CREATE INDEX idx_orders_items_gin 
-ON orders USING GIN (items);
-
 CREATE INDEX idx_inbox_payload_gin 
 ON webhook_inbox USING GIN (payload);
 
