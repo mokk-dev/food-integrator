@@ -30,9 +30,6 @@ CREATE TABLE operation_days (
     PRIMARY KEY (id, operation_day)
 );
 
--- Converter em hypertable para otimizar queries temporais
-SELECT create_hypertable('operation_days', 'operation_day', chunk_time_interval => INTERVAL '365 days');
-
 -- Índices
 CREATE UNIQUE INDEX idx_unique_expediente 
 ON operation_days (merchant_id, operation_day, opened_at);
