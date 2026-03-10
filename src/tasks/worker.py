@@ -178,6 +178,12 @@ class WebhookWorker:
                         """),
                         {"status": new_status, "order_id": order_id, "event_dt": event_dt, "cancel_reason": cancellation_reason}
                     )
+
+                    if new_status in ["closed"]:
+                        log.info("event.final_enrichment", msg="Pedido atingiu status terminal. Atualizando dados finais (pagamento, itens)...")
+                        enrichment = OrderEnrichmentService()
+                        # Chama a API Pública de novo e sobrescreve as tabelas com os dados finais
+                        await enrichment.enrich_order(session=session, order_id=order_id, merchant_id=merchant_id)
                     
                     # 4. Gatilho de Motoboy (API Dashboard)
                     if new_status == "released":
