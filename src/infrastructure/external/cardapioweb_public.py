@@ -2,6 +2,7 @@
 # CLIENT API PÚBLICA (PARTNER) - CARDAPIOWEB
 # ============================================
 
+from datetime import datetime
 from typing import Any, Dict
 
 from src.config import settings
@@ -49,3 +50,20 @@ class CardapiowebPublicAPI(BaseAPIClient):
     async def get_order_by_display_id(self, display_id: str) -> Dict[str, Any]:
         """Busca pedido por display ID (UID curto)."""
         return await self.get(f"/orders/by-display-id/{display_id}")
+    
+    @api_method
+    async def get_orders_history_page(self, start_date: datetime, end_date: datetime, page: int = 1) -> Dict[str, Any]:
+        """Busca apenas UMA página do histórico. O Rate Limit é controlado pelo serviço."""
+        
+        # Formato exigido pela API: 2026-03-8T18:18:19.813-03:00
+        start_str = start_date.strftime("%Y-%m-%dT%H:%M:%S.000-03:00")
+        end_str = end_date.strftime("%Y-%m-%dT%H:%M:%S.000-03:00")
+
+        params = {
+            "start_date": start_str,
+            "end_date": end_str,
+            "page": page,
+            "per_page": 100
+        }
+        
+        return await self.get("/orders/history", params=params)

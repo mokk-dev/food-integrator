@@ -1,5 +1,9 @@
+-- ============================================
+-- TABELA: CREDENCIAIS DO LOJISTA
+-- ============================================
+
 CREATE TABLE IF NOT EXISTS merchant_credentials (
-    merchant_id UUID PRIMARY KEY REFERENCES merchants(id) ON DELETE CASCADE,
+    merchant_id VARCHAR(50) PRIMARY KEY REFERENCES merchants(merchant_id) ON DELETE CASCADE,
     access_token TEXT NOT NULL,
     refresh_token TEXT NOT NULL,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,

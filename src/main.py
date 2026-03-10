@@ -8,7 +8,7 @@ from sqlalchemy import text
 from src.config import settings
 from src.infrastructure.cache.redis_client import redis_client
 from src.infrastructure.db.connection import close_db, init_db
-from src.api.routes import webhooks
+from src.api.routes import webhooks, admin
 from src.core.logger import logger
 from src.infrastructure.external.cardapioweb_auth import CardapiowebAuthManager
 
@@ -181,6 +181,11 @@ app.include_router(
     tags=["Webhooks"]
 )
 
+app.include_router(
+    admin.router,
+    prefix="/api/admin",
+    tags=["Admin"]
+)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

@@ -86,6 +86,20 @@ class Settings(BaseSettings):
         default=10,
         alias="CARDAPIOWEB_API_TIMEOUT"
     )
+
+    # --------------------------------------------
+    # Cardapioweb APIs - Rate Limits
+    # --------------------------------------------
+    cardapioweb_history_rate_limit: int = Field(
+        default=5, 
+        alias="CARDAPIOWEB_HISTORY_RATE_LIMIT",
+        description="Requisições permitidas por minuto na rota aberta de histórico do CW"
+    )
+    cardapioweb_details_rate_limit: int = Field(
+        default=100, 
+        alias="CARDAPIOWEB_DETAILS_RATE_LIMIT",
+        description="Requisições permitidas por minuto na rota aberta de detalhes do CW"
+    )
     
     
     # --------------------------------------------
