@@ -140,7 +140,6 @@ class ReconciliationService:
                     FROM orders 
                     WHERE merchant_id = :mid 
                       AND order_type = 'delivery'
-                      AND delivery_man_name IS NULL
                       AND created_at >= :opened_at
                       AND created_at <= :closed_at
                 """)

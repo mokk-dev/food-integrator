@@ -190,7 +190,7 @@ class OrderEnrichmentService:
     def _should_call_dashboard(self, order_data: Dict) -> bool:
         if order_data.get("order_type") != "delivery": return False
         return order_data.get("status", "") == "released"
-    
+
     async def _insert_order(
         self, session: AsyncSession, order_id: int, merchant_id: str,
         operation_day_id: int, order_data: Dict, distance_km: Optional[float], distance_zone: Optional[str]

@@ -180,9 +180,8 @@ class WebhookWorker:
                     )
 
                     if new_status in ["closed"]:
-                        log.info("event.final_enrichment", msg="Pedido atingiu status terminal. Atualizando dados finais (pagamento, itens)...")
+                        log.info("event.final_enrichment", msg="Pedido atingiu status terminal. Atualizando dados finais")
                         enrichment = OrderEnrichmentService()
-                        # Chama a API Pública de novo e sobrescreve as tabelas com os dados finais
                         await enrichment.enrich_order(session=session, order_id=order_id, merchant_id=merchant_id)
                     
                     # 4. Gatilho de Motoboy (API Dashboard)
