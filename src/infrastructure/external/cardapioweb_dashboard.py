@@ -3,6 +3,7 @@
 # ============================================
 
 from typing import Any, Dict
+from datetime import datetime
 
 from src.config import settings
 from src.infrastructure.external.base_client import BaseAPIClient, api_method
@@ -77,17 +78,78 @@ class CardapiowebDashboardAPI(BaseAPIClient):
     @api_method
     async def get_delivery_info(self, order_id: int) -> Dict[str, Any]:
         """
-        Busca informações de entrega (delivery man, route).
-        Tenta endpoint específico de delivery ou extrai do order details.
+        Busca informações de entrega.
+        A rota específica /delivery retorna 302 (redirect) na Cardapioweb,
+        então vamos direto para a rota de detalhes que já contém essa informação.
         """
-        try:
-            delivery = await self._execute_with_auth("get", f"/v1/company/orders/{order_id}/delivery")
-            if delivery and not delivery.get("_api_error"):
-                return delivery
-        except Exception:
-            pass
-
         return await self.get_order_details(order_id)
+    
+    @api_method
+    async def get_delivery_men_summary(self, start_date: datetime, end_date: datetime) -> list:
+        """
+        Busca o resumo (quantidade de pedidos) de todos os motoboys no período.
+        """
+        start_str = start_date.strftime("%Y-%m-%dT%H:%M:%S.000-03:00")
+        end_str = end_date.strftime("%Y-%m-%dT%H:%M:%S.000-03:00")
+        
+        params = {
+            "q[order_filters][created_at_gteq]": start_str,
+            "q[order_filters][created_at_lteq]": end_str,
+            "q[delivery_man_filters][active_eq]": "true"
+        }
+        
+        return await self._execute_with_auth("get", "/v2/company/delivery_men/orders_summary", params=params)
+
+    @api_method
+    async def get_orders_by_delivery_man(self, delivery_man_id: int, start_date: datetime, end_date: datetime) -> list:
+        """
+        Busca a lista completa de pedidos entregues por um motoboy específico (com paginação).
+        """
+        start_str = start_date.strftime("%Y-%m-%dT%H:%M:%S.000-03:00")
+        end_str = end_date.strftime("%Y-%m-%dT%H:%M:%S.000-03:00")
+        
+        all_orders = []
+        page = 1
+        
+        while True:
+            params = {
+                "page": page,
+                "per_page": 100,
+                # Utilizando os filtros de data de despacho conforme o payload mapeado
+                "q[order_filters][order_dispatch_date_gteq]": start_str,
+                "q[order_filters][order_dispatch_date_lteq]": end_str,
+                "q[delivery_man_filters][id_eq]": delivery_man_id
+            }
+            
+            response = await self._execute_with_auth("get", "/v2/company/delivery_men/orders", params=params)
+            
+            if not response or not isinstance(response, list):
+                break
+                
+            all_orders.extend(response)
+            
+            if len(response) < 100:
+                break
+                
+            page += 1
+            
+        return all_orders
+    
+    @api_method
+    async def get_cash_flows(self, page: int = 1, per_page: int = 10) -> list:
+        """Busca a lista dos caixas abertos e fechados."""
+        params = {"page": page, "per_page": per_page, "order_by": "id", "order": "desc"}
+        return await self._execute_with_auth("get", "/v1/company/cash_flows", params=params)
+
+    @api_method
+    async def get_cash_flow_summary(self, cash_flow_id: int) -> Dict[str, Any]:
+        """Busca o super-resumo financeiro de um caixa específico."""
+        return await self._execute_with_auth("get", f"/v1/company/cash_flow/{cash_flow_id}/summary")
+
+    @api_method
+    async def get_cash_flow_operations(self, cash_flow_id: int) -> list:
+        """Busca todas as movimentações granulares (sangrias, vendas) do caixa."""
+        return await self._execute_with_auth("get", f"/v1/company/cash_flow/{cash_flow_id}/operations")
     
     def should_enrich(self, order_status: str, order_type: str) -> bool:
         """Determina se deve chamar API de enriquecimento."""

@@ -97,7 +97,8 @@ async def close_merchant_shift(
         reconciliation_service.run_reconciliation_for_shift,
         merchant_id=str(merchant_id),
         opened_at=opened_at,
-        closed_at=closed_at
+        closed_at=closed_at,
+        shift_id=int(shift_id)
     )
 
     return {

@@ -16,7 +16,14 @@ CREATE TABLE IF NOT EXISTS order_payments (
     order_id BIGINT REFERENCES orders(id) ON DELETE CASCADE,
     payment_method VARCHAR(100),
     payment_type VARCHAR(100),
-    total_value NUMERIC(10, 2)
+    total_value NUMERIC(10, 2),
+    change_for NUMERIC(10,2),
+    status VARCHAR(50),
+    card_number VARCHAR(50),
+    card_brand VARCHAR(50),
+    observation TEXT,
+    payment_fee NUMERIC(10,2),
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);

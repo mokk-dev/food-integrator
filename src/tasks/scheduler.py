@@ -105,7 +105,12 @@ async def auto_close_shifts_and_reconcile():
                     
                     # 3. Dispara a Reconciliação
                     service = ReconciliationService()
-                    await service.run_reconciliation_for_shift(str(merchant_id), opened_at, closed_at)
+                    await service.run_reconciliation_for_shift(
+                        merchant_id=str(merchant_id), 
+                        opened_at=opened_at, 
+                        closed_at=closed_at,
+                        shift_id=int(shift_id)
+                    )
 
     except Exception as e:
         logger.error("scheduler.auto_close_shift_failed", error=str(e))

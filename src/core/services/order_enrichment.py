@@ -258,16 +258,42 @@ class OrderEnrichmentService:
         # 4. Inserir Pagamentos
         payments = order_data.get("payments", [])
         if payments:
+            # 1. Substituição Idempotente: Remove apenas os pagamentos DESTE pedido 
+            # antes de gravar a versão mais atualizada. Se não houver nenhum, ele apenas segue.
+            delete_query = text("DELETE FROM order_payments WHERE order_id = :order_id")
+            await session.execute(delete_query, {"order_id": int(order_id)})
+
+            # 2. Insere a foto final do pagamento com os dados completos
             query_payments = text("""
-                INSERT INTO order_payments (order_id, payment_method, payment_type, total_value)
-                VALUES (:order_id, :payment_method, :payment_type, :total_value)
+                INSERT INTO order_payments (
+                    order_id, payment_method, payment_type, total_value,
+                    change_for, status, card_number, card_brand, observation, payment_fee
+                )
+                VALUES (
+                    :order_id, :payment_method, :payment_type, :total_value,
+                    :change_for, :status, :card_number, :card_brand, :observation, :payment_fee
+                )
             """)
+            
             for pay in payments:
+                # Tratamento seguro para conversão de valores numéricos opcionais
+                change_for_val = pay.get("change_for")
+                change_for = float(change_for_val) if change_for_val is not None else None
+                
+                payment_fee_val = pay.get("payment_fee")
+                payment_fee = float(payment_fee_val) if payment_fee_val is not None else 0.0
+
                 await session.execute(query_payments, {
                     "order_id": int(order_id),
                     "payment_method": pay.get("payment_method"),
                     "payment_type": pay.get("payment_type"),
-                    "total_value": pay.get("total", pay.get("total_value", 0.0))
+                    "total_value": float(pay.get("total", pay.get("total_value", 0.0))),
+                    "change_for": change_for,
+                    "status": pay.get("status"),
+                    "card_number": pay.get("card_number"),
+                    "card_brand": pay.get("card_brand"),
+                    "observation": pay.get("observation"),
+                    "payment_fee": payment_fee
                 })
     
     async def _update_with_dashboard_data(self, session: AsyncSession, order_id: int, dashboard_data: Dict):
