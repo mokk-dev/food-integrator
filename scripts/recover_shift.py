@@ -3,7 +3,7 @@ from datetime import datetime
 from src.core.services.reconciliation_service import ReconciliationService
 
 # IMPORTANTE: Ajuste o caminho de importação abaixo se o seu arquivo do redis estiver em outra pasta
-from src.infrastructure.cache.redis import redis_client 
+from src.infrastructure.cache.redis_client import redis_client 
 
 async def run_recovery():
     print("Iniciando script de recuperação de turno...")
