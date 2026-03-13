@@ -196,11 +196,10 @@ class ReconciliationService:
                         order_updates.append({
                             "order_id": order.get("id"),
                             "mid": merchant_id,
-                            "driver_id": driver_id_str,
+                            "driver_id": int(driver_id_str) if driver_id_str and driver_id_str.isdigit() else None,
                             "driver_name": driver_name,
                             "driver_phone": driver_phone
                         })
-                    
                     await asyncio.sleep(self.details_sleep_time)
 
             if order_updates:
@@ -303,6 +302,13 @@ class ReconciliationService:
                             
                         user_info = op.get("user") or {}
                         
+                        # Conversão da string ISO para datetime
+                        raw_created_at = op.get("created_at")
+                        parsed_created_at = None
+                        if raw_created_at:
+                            # Trata a string ISO se vier do formato JSON da API
+                            parsed_created_at = datetime.fromisoformat(str(raw_created_at).replace("Z", "+00:00"))
+                        
                         await session.execute(op_query, {
                             "id": op.get("id"),
                             "shift_id": shift_id,
@@ -312,7 +318,7 @@ class ReconciliationService:
                             "value": float(val) if val is not None else 0.0,
                             "payment_id": op.get("payment_method_id"),
                             "payment_name": op.get("payment_method_name"),
-                            "created_at": op.get("created_at"),
+                            "created_at": parsed_created_at, # Usando o datetime convertido
                             "order_id": op.get("order_id"),
                             "user_name": user_info.get("name", "Sistema")
                         })
