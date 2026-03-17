@@ -14,10 +14,8 @@ class SnapshotService:
     Serviço responsável por calcular e registrar o estado da operação (WIP).
     """
 
-    async def take_snapshots(self):
+async def take_snapshots(self):
         """Busca todos os expedientes abertos e gera um snapshot para cada."""
-        logger.info("snapshot.started", msg="Iniciando geração de snapshots operacionais...")
-        
         try:
             async with get_db_session() as session:
                 result = await session.execute(
@@ -26,8 +24,10 @@ class SnapshotService:
                 open_days = result.fetchall()
 
                 if not open_days:
-                    logger.info("snapshot.skipped", msg="Nenhum expediente aberto no momento.")
+                    logger.debug("snapshot.skipped", msg="Nenhum expediente aberto no momento.")
                     return
+
+                logger.info("snapshot.started", msg=f"Encontrados {len(open_days)} expedientes abertos. Gerando snapshots...")
 
                 for op_day in open_days:
                     op_id, merchant_id, capacity = op_day
@@ -35,7 +35,7 @@ class SnapshotService:
 
                 await session.commit()
                 logger.info("snapshot.completed", generated_count=len(open_days))
-                
+
         except Exception as e:
             logger.error("snapshot.failed", error=str(e), exc_info=True)
 
@@ -74,7 +74,7 @@ class SnapshotService:
         avgs_query = text("SELECT avg_prep_time, avg_delivery_time FROM calculate_recent_averages(:op_id)")
         avgs_result = await session.execute(avgs_query, {"op_id": op_id})
         avgs = avgs_result.fetchone()
-        
+
         avg_prep = avgs[0] if avgs and avgs[0] else 0
         avg_del = avgs[1] if avgs and avgs[1] else 0
 

@@ -2,8 +2,6 @@
 -- VIEWS E FUNÇÕES ANALÍTICAS
 -- ============================================
 
--- View: Resumo do expediente (materializada para performance)
--- VERSÃO CORRIGIDA: Subqueries mais seguras para evitar agregações complexas
 CREATE MATERIALIZED VIEW shift_summary AS
 SELECT 
     od.id as operation_day_id,
@@ -17,8 +15,7 @@ SELECT
     od.total_orders,
     od.canceled_orders,
     COALESCE(od.total_revenue, 0) as total_revenue,
-    
-    -- Ticket médio calculado diretamente das orders para precisão
+
     COALESCE(
         (SELECT AVG(total_value) 
          FROM orders o 
@@ -29,8 +26,7 @@ SELECT
     
     od.avg_preparation_minutes,
     od.avg_delivery_minutes,
-    
-    -- Subqueries são mais seguras para contagens condicionais em Views complexas
+
     (SELECT COUNT(*) 
      FROM orders o 
      WHERE o.operation_day_id = od.id 
@@ -45,8 +41,7 @@ SELECT
      FROM orders o 
      WHERE o.operation_day_id = od.id 
        AND o.distance_zone = 'far') as orders_far,
-    
-    -- Agregação segura de canais
+
     (
         SELECT JSONB_OBJECT_AGG(channel, count)
         FROM (
@@ -72,10 +67,8 @@ SELECT
 
 FROM operation_days od;
 
--- Índice na view materializada
 CREATE UNIQUE INDEX idx_shift_summary_pk ON shift_summary (operation_day_id);
 
--- Função para atualizar métricas do expediente ao fechar
 CREATE OR REPLACE FUNCTION finalize_operation_day(
     p_operation_day_id INT,
     p_closed_at TIMESTAMPTZ
@@ -100,8 +93,7 @@ BEGIN
         v_avg_delivery
     FROM orders
     WHERE operation_day_id = p_operation_day_id;
-    
-    -- Atualizar operation_day
+
     UPDATE operation_days
     SET closed_at = p_closed_at,
         total_orders = v_total_orders,
@@ -109,8 +101,7 @@ BEGIN
         total_revenue = v_total_revenue,
         avg_delivery_minutes = v_avg_delivery
     WHERE id = p_operation_day_id;
-    
-    -- Refresh da view materializada
+
     REFRESH MATERIALIZED VIEW CONCURRENTLY shift_summary;
 END;
 $$ LANGUAGE plpgsql;

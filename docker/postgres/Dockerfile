@@ -1,7 +1,3 @@
-# ============================================
-# PostgreSQL 14 + TimescaleDB
-# ============================================
-
 FROM timescale/timescaledb:2.11.0-pg14
 
 LABEL maintainer="Cardapioweb Integrator"

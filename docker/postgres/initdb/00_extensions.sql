@@ -12,7 +12,6 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 ALTER DATABASE delivery SET timezone TO 'America/Sao_Paulo';
 SET timezone = 'America/Sao_Paulo';
 
--- Função de atualização automática de updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN

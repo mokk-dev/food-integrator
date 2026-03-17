@@ -1,4 +1,3 @@
--- Tabela de Itens do Pedido
 CREATE TABLE IF NOT EXISTS order_items (
     id BIGSERIAL PRIMARY KEY,
     order_id BIGINT REFERENCES orders(id) ON DELETE CASCADE,
@@ -10,7 +9,6 @@ CREATE TABLE IF NOT EXISTS order_items (
     category_name VARCHAR(255)
 );
 
--- Tabela de Pagamentos do Pedido
 CREATE TABLE IF NOT EXISTS order_payments (
     id BIGSERIAL PRIMARY KEY,
     order_id BIGINT REFERENCES orders(id) ON DELETE CASCADE,

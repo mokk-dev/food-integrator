@@ -48,7 +48,6 @@ CREATE TABLE IF NOT EXISTS cash_flow_operations (
     user_name VARCHAR(100)
 );
 
--- Índices
 CREATE UNIQUE INDEX idx_unique_expediente 
 ON operation_days (merchant_id, operation_day, opened_at);
 

@@ -3,7 +3,7 @@
 # ============================================
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 from src.config import settings
 from src.infrastructure.external.base_client import BaseAPIClient, api_method
@@ -12,22 +12,22 @@ from src.infrastructure.external.base_client import BaseAPIClient, api_method
 class CardapiowebPublicAPI(BaseAPIClient):
     """
     Cliente para API Partner do Cardapioweb.
-    
+
     URL Base: https://integracao.cardapioweb.com/api/partner/v1
     Endpoint: GET /orders/{orderId}
     """
-    
+
     def __init__(self):
-        super().__init__(
-            base_url=settings.cardapioweb_public_base_url
+        super().__init__(base_url=settings.cardapioweb_public_base_url)
+        self.client.headers.update(
+            {
+                "X-API-KEY": settings.cardapioweb_public_api_key,
+                "Accept": "application/json",
+            }
         )
-        self.client.headers.update({
-            "X-API-KEY": settings.cardapioweb_public_api_key,
-            "Accept": "application/json"
-        })
-    
+
     @api_method
-    async def get_order(self, order_id: int) -> Dict[str, Any]:
+    async def get_order(self, order_id: int) -> dict[str, Any]:
         """Busca dados completos de um pedido."""
 
         if settings.app_env != "production" and order_id in [555777, 999001, 999999]:
@@ -41,21 +41,22 @@ class CardapiowebPublicAPI(BaseAPIClient):
                 "deliveryFee": 5.00,
                 "status": "pending",
                 "createdAt": "2026-02-23T20:00:00Z",
-                "deliveryAddress": {"lat": -23.425, "lng": -51.915}
+                "deliveryAddress": {"lat": -23.425, "lng": -51.915},
             }
-        
+
         return await self.get(f"/orders/{order_id}")
-    
+
     @api_method
-    async def get_order_by_display_id(self, display_id: str) -> Dict[str, Any]:
+    async def get_order_by_display_id(self, display_id: str) -> dict[str, Any]:
         """Busca pedido por display ID (UID curto)."""
         return await self.get(f"/orders/by-display-id/{display_id}")
-    
+
     @api_method
-    async def get_orders_history_page(self, start_date: datetime, end_date: datetime, page: int = 1) -> Dict[str, Any]:
+    async def get_orders_history_page(
+        self, start_date: datetime, end_date: datetime, page: int = 1
+    ) -> dict[str, Any]:
         """Busca apenas UMA página do histórico. O Rate Limit é controlado pelo serviço."""
-        
-        # Formato exigido pela API: 2026-03-8T18:18:19.813-03:00
+
         start_str = start_date.strftime("%Y-%m-%dT%H:%M:%S.000-03:00")
         end_str = end_date.strftime("%Y-%m-%dT%H:%M:%S.000-03:00")
 
@@ -63,7 +64,7 @@ class CardapiowebPublicAPI(BaseAPIClient):
             "start_date": start_str,
             "end_date": end_str,
             "page": page,
-            "per_page": 100
+            "per_page": 100,
         }
-        
+
         return await self.get("/orders/history", params=params)

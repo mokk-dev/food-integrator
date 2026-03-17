@@ -39,10 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Copiar virtual environment COMPLETO (com todos os binários)
 COPY --from=builder /opt/venv /opt/venv
 
-# Ativar PATH do venv
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -51,11 +49,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     APP_HOME=/app \
     PYTHONPATH=/app
 
-# Copiar código fonte (necessário para imports)
 COPY pyproject.toml .
 COPY src/ ./src/
 
-# Garantir que o pacote está registrado (symlinks)
 RUN pip install . --no-deps
 
 # Permissões
@@ -65,5 +61,4 @@ USER appuser
 
 EXPOSE 8000
 
-# Usar python -m para garantir que encontra o módulo
 CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
