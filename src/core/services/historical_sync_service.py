@@ -88,7 +88,7 @@ class HistoricalSyncService:
         cf_id = cash_flow_data.get("id")
         opened_at = datetime.fromisoformat(cash_flow_data["open_at"].replace("Z", "+00:00"))
         closed_at = datetime.fromisoformat(cash_flow_data["closed_at"].replace("Z", "+00:00"))
-        operation_day_date = opened_at.strftime('%Y-%m-%d')
+        operation_day_date = opened_at.date()
 
         async with get_db_session() as session:
             query_shift = text("""
