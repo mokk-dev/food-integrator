@@ -64,7 +64,7 @@ class HistoricalSyncService:
 
             # 2. Processa cada expediente
             for index, cf in enumerate(cash_flows, start=1):
-                await redis_client.expire(lock_key, 600)
+                await redis_client.client.expire(lock_key, 600)
                 
                 await self._process_single_shift(merchant_id, cf)
                 

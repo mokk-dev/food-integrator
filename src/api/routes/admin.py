@@ -142,7 +142,7 @@ async def sync_merchant_history(
 
     lock_key = f"backfill_lock:{merchant_id}"
     
-    if not await redis_client.set(lock_key, "queued", nx=True, ex=600):
+    if not await redis_client.client.set(lock_key, "queued", nx=True, ex=600):
         raise HTTPException(status_code=429, detail="Sincronização em andamento para esta loja.")
 
     query = text("""
