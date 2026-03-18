@@ -14,7 +14,7 @@ class SnapshotService:
     Serviço responsável por calcular e registrar o estado da operação (WIP).
     """
 
-async def take_snapshots(self):
+    async def take_snapshots(self):
         """Busca todos os expedientes abertos e gera um snapshot para cada."""
         try:
             async with get_db_session() as session:

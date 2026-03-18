@@ -2,15 +2,15 @@ import asyncio
 from datetime import datetime
 
 from src.core.services.reconciliation_service import ReconciliationService
-from src.infrastructure.cache.redis_client import redis_client
 
+from src.infrastructure.cache.redis_client import redis_client 
 
 async def run_recovery():
     print("Iniciando script de recuperação de turno...")
-
+    
     print("Conectando ao Redis...")
     await redis_client.connect()
-
+    
     service = ReconciliationService()
 
     merchant_id = "6758"
@@ -39,3 +39,4 @@ async def run_recovery():
 
 if __name__ == "__main__":
     asyncio.run(run_recovery())
+
