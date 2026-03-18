@@ -167,7 +167,7 @@ class CardapiowebDashboardAPI(BaseAPIClient):
         target_cash_flows = []
         keep_fetching = True
 
-        print(f"🔍 Iniciando rastreio de caixas entre {start_date.strftime('%d/%m/%Y')} e {end_date.strftime('%d/%m/%Y')}...")
+        print(f"Iniciando rastreio de caixas entre {start_date.strftime('%d/%m/%Y')} e {end_date.strftime('%d/%m/%Y')}...")
 
         while keep_fetching:
             params = {
@@ -177,12 +177,15 @@ class CardapiowebDashboardAPI(BaseAPIClient):
                 "order": "desc"
             }
             
-            # 1. httpx mescla o CompanyId com o Token JWT do BaseClient
-            headers = {"CompanyId": str(merchant_id)}
+            headers = {
+                "CompanyId": str(merchant_id),
+                "Accept": "application/json",
+                "Origin": "https://portal.cardapioweb.com",
+                "Referer": "https://portal.cardapioweb.com/"
+            }
             
-            # 2. Force URL absoluta
             response = await self.get(
-                "https://api.cardapioweb.com/api/v1/company/cash_flows", 
+                "/api/v1/company/cash_flows", 
                 params=params,
                 headers=headers
             )
@@ -212,7 +215,7 @@ class CardapiowebDashboardAPI(BaseAPIClient):
                     
                 target_cash_flows.append(item)
 
-            print(f"📄 Página {page} processada. Caixas encontrados no alvo até agora: {len(target_cash_flows)}")
+            print(f"Página {page} processada. Caixas encontrados no alvo até agora: {len(target_cash_flows)}")
             page += 1
 
         target_cash_flows.reverse()
