@@ -156,3 +156,65 @@ class CardapiowebDashboardAPI(BaseAPIClient):
         if order_type != 'delivery':
             return False
         return order_status in ['released', 'dispatched', 'in_transit', 'delivered', 'ready']
+    
+    @api_method
+    async def get_cash_flows_by_period(self, start_date: datetime, end_date: datetime) -> list:
+        """
+        Busca os caixas fechados de um período específico.
+        Como a API parceira ignora filtros de data, usamos paginação reversa (desc) 
+        até atingir e isolar o período desejado.
+        """
+        page = 1
+        per_page = 75
+        target_cash_flows = []
+        keep_fetching = True
+
+        print(f"Iniciando rastreio de caixas entre {start_date.strftime('%d/%m/%Y')} e {end_date.strftime('%d/%m/%Y')}...")
+
+        while keep_fetching:
+            params = {
+                "page": page,
+                "per_page": per_page,
+                "order_by": "id",
+                "order": "desc"
+            }
+            
+            # Chama a API fechada
+            response = await self.get("/company/cash_flows", params=params)
+            
+            # Garante a extração seja uma lista direta ou encapsulada em 'data'
+            items = response if isinstance(response, list) else response.get("data", [])
+            
+            if not items:
+                print("Fim absoluto do histórico da loja atingido.")
+                break
+
+            for item in items:
+                # Consideramos apenas caixas que já foram fechados
+                if item.get("status") != "close":
+                    continue
+
+                open_at_str = item.get("open_at")
+                if not open_at_str:
+                    continue
+                
+                # Trata o fuso horário da string que a API envia
+                open_at_dt = datetime.fromisoformat(open_at_str.replace("Z", "+00:00"))
+                
+                if open_at_dt > end_date:
+                    continue
+                    
+                if open_at_dt < start_date:
+                    keep_fetching = False
+                    break
+                    
+                target_cash_flows.append(item)
+
+            print(f"Página {page} processada. Caixas encontrados no alvo até agora: {len(target_cash_flows)}")
+            page += 1
+
+        # Como a API manda do mais novo pro mais velho (desc), invertemos a lista 
+        # para retornar do mais velho pro mais novo (asc), garantindo a cronologia do Backfill
+        target_cash_flows.reverse()
+        
+        return target_cash_flows

@@ -12,8 +12,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+
 from src.core.logger import logger
 from src.core.services.order_enrichment import OrderEnrichmentService
+from src.core.services.historical_sync_service import HistoricalSyncService
+
 from src.infrastructure.cache.redis_client import redis_client
 from src.infrastructure.db.connection import get_db_session
 from src.infrastructure.external.cardapioweb_auth import CardapiowebAuthManager
@@ -23,7 +26,7 @@ from src.tasks.scheduler import start_scheduler
 
 class WebhookWorker:
     """
-    Worker assíncrono para processamento de webhooks.
+    Worker assíncrono para processamento de webhooks e jobs em background.
     """
 
     def __init__(self):
@@ -65,7 +68,11 @@ class WebhookWorker:
         while self.running:
             try:
                 start_time = time.time()
+                
                 processed = await self._process_batch()
+                
+                await self._process_sync_jobs()
+
                 duration = time.time() - start_time
 
                 if processed > 0:
@@ -88,11 +95,30 @@ class WebhookWorker:
                 logger.error("worker.batch_error", error=str(e), exc_info=True)
                 await asyncio.sleep(self.poll_interval)
 
-        print("🛑 Worker encerrado")
+        print("Worker encerrado")
 
     def stop(self):
         print("Recebido sinal de parada...")
         self.running = False
+
+    async def _process_sync_jobs(self):
+        """Busca e executa UM trabalho de sincronização pendente por ciclo."""
+        async with get_db_session() as session:
+            # Usa FOR UPDATE SKIP LOCKED para garantir que 2 workers não peguem o mesmo Job
+            query = text("""
+                SELECT id, merchant_id, start_date, end_date 
+                FROM sync_jobs 
+                WHERE status = 'pending' 
+                ORDER BY created_at ASC LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            """)
+            result = await session.execute(query)
+            job = result.fetchone()
+
+        if job:
+            job_id, merchant_id, start_date, end_date = job
+            sync_service = HistoricalSyncService()
+            await sync_service.run_job(job_id, merchant_id, start_date, end_date)
 
     async def _process_batch(self) -> int:
         """Processa lote de eventos pendentes."""
@@ -147,146 +173,147 @@ class WebhookWorker:
         log = logger.bind(event_id=event_id, order_id=order_id, event_type=event_type)
 
         try:
-            log.info("event.processing_started")
-            payload_dict = (
-                payload
-                if isinstance(payload, dict)
-                else (json.loads(payload) if isinstance(payload, str) else {})
-            )
-            merchant_id = payload_dict.get("merchant_id", self.merchant_id)
-
-            if event_type == "ORDER_CREATED":
-                enrichment = OrderEnrichmentService()
-                success, error = await enrichment.enrich_order(
-                    session=session, order_id=order_id, merchant_id=merchant_id
+            async with session.begin_nested():
+                log.info("event.processing_started")
+                payload_dict = (
+                    payload
+                    if isinstance(payload, dict)
+                    else (json.loads(payload) if isinstance(payload, str) else {})
                 )
-                if not success:
-                    log.error("event.enrichment_failed", error=error)
-                    raise Exception(f"Enrichment failed: {error}")
-                log.info("event.order_enriched")
+                merchant_id = payload_dict.get("merchant_id", self.merchant_id)
 
-            elif event_type == "ORDER_STATUS_UPDATED":
-                new_status = payload_dict.get("order_status") or payload_dict.get(
-                    "new_status"
-                )
-
-                if new_status:
-                    new_status = new_status.lower().strip()
-
-                    # 1. Extração Dinâmica de Datas e Motivos
-                    raw_event_at = payload_dict.get("created_at") or payload_dict.get(
-                        "timestamp"
+                if event_type == "ORDER_CREATED":
+                    enrichment = OrderEnrichmentService()
+                    success, error = await enrichment.enrich_order(
+                        session=session, order_id=order_id, merchant_id=merchant_id
                     )
-                    event_dt = (
-                        datetime.fromisoformat(str(raw_event_at).replace("Z", "+00:00"))
-                        if raw_event_at
-                        else datetime.now()
+                    if not success:
+                        log.error("event.enrichment_failed", error=error)
+                        raise Exception(f"Enrichment failed: {error}")
+                    log.info("event.order_enriched")
+
+                elif event_type == "ORDER_STATUS_UPDATED":
+                    new_status = payload_dict.get("order_status") or payload_dict.get(
+                        "new_status"
                     )
 
-                    cancellation_reason = payload_dict.get("cancellation_reason")
+                    if new_status:
+                        new_status = new_status.lower().strip()
 
-                    # 2. Mapeamento de Status para Colunas da Tabela 'orders'
-                    status_columns = {
-                        "confirmed": "confirmed_at",
-                        "ready": "ready_at",
-                        "released": "released_at",
-                        "waiting_to_catch": "waiting_to_catch_at",
-                        "canceling": "canceling_at",
-                        "canceled": "cancelled_at",
-                        "closed": "closed_at",
-                        "delivered": "delivered_at",
-                    }
-
-                    timestamp_update_query = (
-                        f", {status_columns[new_status]} = :event_dt"
-                        if new_status in status_columns
-                        else ""
-                    )
-                    cancel_update_query = (
-                        ", cancellation_reason = COALESCE(:cancel_reason, cancellation_reason)"
-                        if new_status in ["canceled", "canceling"]
-                        else ""
-                    )
-
-                    # 3. Update Rápido e Limpo
-                    await session.execute(
-                        text(f"""
-                            UPDATE orders
-                            SET status = :status,
-                                updated_at = NOW(),
-                                status_changed_at = :event_dt
-                                {timestamp_update_query}
-                                {cancel_update_query}
-                            WHERE id = :order_id
-                        """),
-                        {
-                            "status": new_status,
-                            "order_id": order_id,
-                            "event_dt": event_dt,
-                            "cancel_reason": cancellation_reason,
-                        },
-                    )
-
-                    if new_status in ["closed"]:
-                        log.info(
-                            "event.final_enrichment",
-                            msg="Pedido atingiu status terminal. Atualizando dados finais",
+                        raw_event_at = payload_dict.get("created_at") or payload_dict.get(
+                            "timestamp"
                         )
-                        enrichment = OrderEnrichmentService()
-                        await enrichment.enrich_order(
-                            session=session, order_id=order_id, merchant_id=merchant_id
+                        event_dt = (
+                            datetime.fromisoformat(str(raw_event_at).replace("Z", "+00:00"))
+                            if raw_event_at
+                            else datetime.now()
                         )
 
-                    # 4. Gatilho de Motoboy (API Dashboard)
-                    if new_status == "released":
-                        result = await session.execute(
-                            text("SELECT order_type FROM orders WHERE id = :order_id"),
-                            {"order_id": order_id},
-                        )
-                        row = result.fetchone()
+                        cancellation_reason = payload_dict.get("cancellation_reason")
 
-                        if row and row[0] == "delivery":
-                            try:
-                                log.info(
-                                    "event.fetching_delivery_man",
-                                    msg="Buscando motoboy na API de Dashboard...",
-                                )
-                                enrichment = OrderEnrichmentService()
-                                async with CardapiowebDashboardAPI() as api_dash:
-                                    dashboard_data = await api_dash.get_order_details(
-                                        order_id
+                        status_columns = {
+                            "confirmed": "confirmed_at",
+                            "ready": "ready_at",
+                            "released": "released_at",
+                            "waiting_to_catch": "waiting_to_catch_at",
+                            "canceling": "canceling_at",
+                            "canceled": "cancelled_at",
+                            "closed": "closed_at",
+                            "delivered": "delivered_at",
+                        }
+
+                        timestamp_update_query = (
+                            f", {status_columns[new_status]} = :event_dt"
+                            if new_status in status_columns
+                            else ""
+                        )
+                        cancel_update_query = (
+                            ", cancellation_reason = COALESCE(:cancel_reason, cancellation_reason)"
+                            if new_status in ["canceled", "canceling"]
+                            else ""
+                        )
+
+                        await session.execute(
+                            text(f"""
+                                UPDATE orders
+                                SET status = :status,
+                                    updated_at = NOW(),
+                                    status_changed_at = :event_dt
+                                    {timestamp_update_query}
+                                    {cancel_update_query}
+                                WHERE id = :order_id
+                            """),
+                            {
+                                "status": new_status,
+                                "order_id": order_id,
+                                "event_dt": event_dt,
+                                "cancel_reason": cancellation_reason,
+                            },
+                        )
+
+                        if new_status in ["closed"]:
+                            log.info(
+                                "event.final_enrichment",
+                                msg="Pedido atingiu status terminal. Atualizando dados finais",
+                            )
+                            enrichment = OrderEnrichmentService()
+                            await enrichment.enrich_order(
+                                session=session, order_id=order_id, merchant_id=merchant_id
+                            )
+
+                        # 4. Gatilho de Motoboy (API Dashboard)
+                        if new_status == "released":
+                            result = await session.execute(
+                                text("SELECT order_type FROM orders WHERE id = :order_id"),
+                                {"order_id": order_id},
+                            )
+                            row = result.fetchone()
+
+                            if row and row[0] == "delivery":
+                                try:
+                                    log.info(
+                                        "event.fetching_delivery_man",
+                                        msg="Buscando motoboy na API de Dashboard...",
                                     )
-                                    if dashboard_data and not dashboard_data.get(
-                                        "_api_error"
-                                    ):
-                                        await enrichment._update_with_dashboard_data(
-                                            session, order_id, dashboard_data
+                                    enrichment = OrderEnrichmentService()
+                                    async with CardapiowebDashboardAPI() as api_dash:
+                                        dashboard_data = await api_dash.get_order_details(
+                                            order_id
                                         )
-                                        log.info(
-                                            "event.delivery_man_updated",
-                                            msg="Motoboy registrado com sucesso.",
-                                        )
-                            except Exception as dash_err:
-                                log.warning(
-                                    "event.delivery_man_fetch_failed",
-                                    error=str(dash_err),
-                                )
+                                        if dashboard_data and not dashboard_data.get(
+                                            "_api_error"
+                                        ):
+                                            await enrichment._update_with_dashboard_data(
+                                                session, order_id, dashboard_data
+                                            )
+                                            log.info(
+                                                "event.delivery_man_updated",
+                                                msg="Motoboy registrado com sucesso.",
+                                            )
+                                except Exception as dash_err:
+                                    log.warning(
+                                        "event.delivery_man_fetch_failed",
+                                        error=str(dash_err),
+                                    )
 
-                    log.info(
-                        "event.status_updated",
-                        new_status=new_status,
-                        event_time=str(event_dt),
-                    )
+                        log.info(
+                            "event.status_updated",
+                            new_status=new_status,
+                            event_time=str(event_dt),
+                        )
+                    else:
+                        log.warning("event.missing_new_status", payload=payload_dict)
+
                 else:
-                    log.warning("event.missing_new_status", payload=payload_dict)
+                    log.info("event.ignored", msg="Evento não tratado")
 
-            else:
-                log.info("event.ignored", msg="Evento não tratado")
+                await self._mark_processed(session, event_id)
 
-            await self._mark_processed(session, event_id)
             return True
 
         except Exception as e:
+            # Se der erro de BD, o rollback daquele webhook acontece silenciosamente
+            # e a transação principal sobrevive para registrar a falha abaixo
             log.error("event.processing_failed", error=str(e), exc_info=True)
             await self._mark_failed(session, event_id, str(e))
             return False

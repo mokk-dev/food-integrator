@@ -2,22 +2,35 @@
 # ADMIN ROUTES - PORTAL DO CLIENTE
 # =================================
 
-from fastapi import APIRouter, Depends, status, BackgroundTasks
+from fastapi import APIRouter, Depends, status, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta
 
-from datetime import datetime
 from src.infrastructure.db.connection import get_db
 from src.infrastructure.cache.redis_client import redis_client
 from src.core.services.reconciliation_service import ReconciliationService
-
+from src.core.services.historical_sync_service import HistoricalSyncService
 
 router = APIRouter()
+
+# -----------------------------------------------------------------------------
+# SCHEMAS (Pydantic Models)
+# -----------------------------------------------------------------------------
 
 class InjectCredentialsPayload(BaseModel):
     refresh_token: str = Field(..., description="Refresh token extraído do navegador após passar pelo reCaptcha")
     access_token: str = Field("token_placeholder", description="Access token temporário (opcional, será renovado logo)")
+
+class SyncHistoryRequest(BaseModel):
+    start_date: datetime
+    end_date: datetime
+
+
+# -----------------------------------------------------------------------------
+# ROUTES
+# -----------------------------------------------------------------------------
 
 @router.post(
     "/merchants/{merchant_id}/credentials", 
@@ -60,6 +73,7 @@ async def inject_merchant_credentials(
         "status": "success", 
         "message": f"Credenciais injetadas com sucesso para a loja {merchant_id}. Status atualizado para ACTIVE."
     }
+
 
 @router.post(
     "/merchants/{merchant_id}/shifts/close", 
@@ -105,3 +119,76 @@ async def close_merchant_shift(
         "status": "success", 
         "message": "Caixa fechado com sucesso. A auditoria de pedidos foi iniciada em background."
     }
+
+
+@router.post(
+    "/merchants/{merchant_id}/sync-history", 
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Dispara a sincronização histórica (Backfill) limitando a 31 dias e processos simultâneos."
+)
+
+@router.post("/merchants/{merchant_id}/sync-history", status_code=status.HTTP_202_ACCEPTED)
+async def sync_merchant_history(
+    merchant_id: str,
+    payload: SyncHistoryRequest,
+    session: AsyncSession = Depends(get_db)
+):
+    """Enfileira um Job de Backfill e trava concorrência."""
+    if payload.start_date > payload.end_date:
+        raise HTTPException(status_code=400, detail="Data início maior que data fim.")
+
+    if (payload.end_date - payload.start_date).days > 31:
+        raise HTTPException(status_code=400, detail="O período máximo é de 31 dias.")
+
+    lock_key = f"backfill_lock:{merchant_id}"
+    
+    if not await redis_client.set(lock_key, "queued", nx=True, ex=600):
+        raise HTTPException(status_code=429, detail="Sincronização em andamento para esta loja.")
+
+    query = text("""
+        INSERT INTO sync_jobs (merchant_id, start_date, end_date, status)
+        VALUES (:mid, :start, :end, 'pending')
+        RETURNING id
+    """)
+    result = await session.execute(query, {"mid": merchant_id, "start": payload.start_date, "end": payload.end_date})
+    job_id = result.scalar()
+    await session.commit()
+
+    return {"message": "Sincronização enfileirada", "job_id": job_id, "status": "pending"}
+
+
+@router.get("/merchants/{merchant_id}/sync-status", status_code=status.HTTP_200_OK)
+async def get_sync_status(merchant_id: str, session: AsyncSession = Depends(get_db)):
+    """Rota para o Front-end consultar e montar a Barra de Progresso."""
+    query = text("""
+        SELECT id, start_date, end_date, status, total_shifts, processed_shifts, error_message, updated_at
+        FROM sync_jobs
+        WHERE merchant_id = :mid
+        ORDER BY created_at DESC LIMIT 1
+    """)
+    result = await session.execute(query, {"mid": merchant_id})
+    job = result.fetchone()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Nenhum histórico de sincronização encontrado.")
+
+    percentual = 0
+    if job.total_shifts > 0:
+        percentual = round((job.processed_shifts / job.total_shifts) * 100, 2)
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "progress_percentage": percentual,
+        "shifts": {"processed": job.processed_shifts, "total": job.total_shifts},
+        "error": job.error_message,
+        "last_updated": job.updated_at
+    }
+
+
+@router.delete("/merchants/{merchant_id}/sync-lock", status_code=status.HTTP_200_OK)
+async def unlock_merchant_sync(merchant_id: str):
+    """ROTA DE EMERGÊNCIA: Remove a trava presa no Redis caso um Hard Crash ocorra."""
+    lock_key = f"backfill_lock:{merchant_id}"
+    await redis_client.delete(lock_key)
+    return {"message": f"Lock de sincronização removido à força para {merchant_id}."}
