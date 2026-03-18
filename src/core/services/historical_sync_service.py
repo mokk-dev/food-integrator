@@ -92,14 +92,27 @@ class HistoricalSyncService:
 
         async with get_db_session() as session:
             query_shift = text("""
-                INSERT INTO operation_days (merchant_id, operation_day, opened_at, closed_at, cash_flow_id)
-                VALUES (:mid, :op_day, :opened, :closed, :cf_id)
-                ON CONFLICT (merchant_id, operation_day) DO UPDATE SET 
-                    opened_at = EXCLUDED.opened_at, closed_at = EXCLUDED.closed_at, cash_flow_id = EXCLUDED.cash_flow_id
+                INSERT INTO operation_days (
+                    merchant_id, operation_day, opened_at, closed_at, cash_flow_id,
+                    start_time, end_time, delivery_capacity
+                )
+                SELECT 
+                    merchant_id, :op_day, :opened, :closed, :cf_id,
+                    default_start_time, default_end_time, default_delivery_capacity
+                FROM merchants
+                WHERE merchant_id = :mid
+                ON CONFLICT (merchant_id, operation_day, opened_at) DO UPDATE SET 
+                    closed_at = EXCLUDED.closed_at, 
+                    cash_flow_id = EXCLUDED.cash_flow_id
                 RETURNING id
             """)
+            
             result = await session.execute(query_shift, {
-                "mid": merchant_id, "op_day": operation_day_date, "opened": opened_at, "closed": closed_at, "cf_id": cf_id
+                "mid": merchant_id, 
+                "op_day": operation_day_date, 
+                "opened": opened_at, 
+                "closed": closed_at, 
+                "cf_id": cf_id
             })
             shift_internal_id = result.scalar()
             await session.commit()
