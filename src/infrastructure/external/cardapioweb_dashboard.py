@@ -184,8 +184,9 @@ class CardapiowebDashboardAPI(BaseAPIClient):
                 "Referer": "https://portal.cardapioweb.com/"
             }
             
-            response = await self.get(
-                "/api/v1/company/cash_flows", 
+            response = await self._execute_with_auth(
+                "get",
+                "/v1/company/cash_flows", 
                 params=params,
                 headers=headers
             )
@@ -193,7 +194,7 @@ class CardapiowebDashboardAPI(BaseAPIClient):
             items = response if isinstance(response, list) else response.get("data", [])
             
             if not items:
-                print("🏁 Fim absoluto do histórico da loja atingido.")
+                print("Fim absoluto do histórico da loja atingido.")
                 break
 
             for item in items:
