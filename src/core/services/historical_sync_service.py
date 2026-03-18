@@ -52,7 +52,7 @@ class HistoricalSyncService:
 
             # 1. Busca os caixas
             async with CardapiowebDashboardAPI() as dashboard_api:
-                cash_flows = await dashboard_api.get_cash_flows_by_period(start_date, end_date)
+                cash_flows = await dashboard_api.get_cash_flows_by_period(merchant_id, start_date, end_date)
 
             total_shifts = len(cash_flows) if cash_flows else 0
 
